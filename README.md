@@ -63,18 +63,6 @@ Available Flags:
 - --sleep-only	          Use only sleep-based detection methods for time-based SQL injection.
 - --timeout               Timeout for each request in seconds (default: 10).
 
-## How It Works
-
-#### Injection Detection Methods:
-BlindBrute allows users to choose from multiple comparison methods to detect SQL injection vulnerabilities:
-
-**Status Code Comparison:** Checks if the server returns different status codes for injected and non-injected requests.
-**Content Length Comparison:** Compares the length of the HTTP response content for changes that suggest successful injection.
-**Keyword Matching:** The most powerful option, allowing users to specify keywords to search for in the response. This method will override the other two methods if selected.
-
-#### Data Extraction:
-Blind SQL injection is performed by testing individual characters in the extracted data. The tool will brute-force the value character by character, checking each response for the success of the injection based on the selected detection method.
-
 ## Contributing
 Contributions are welcome! Feel free to open issues and submit pull requests.
 
