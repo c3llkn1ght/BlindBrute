@@ -48,21 +48,20 @@ python blindbrute.py -u http://target.com -f request.txt -t Users -c Password -w
 ```
 You can provide a raw HTTP request file where the placeholder INJECT indicates where the SQL injection payload will be inserted. The tool will replace INJECT with the payload during execution.
 
-Available Flags
-Flag	Description
-**-u, --url**	The target URL to send requests to (required).
-**-cn, --cookie-name**	The name of the cookie field for injection (optional).
-**-cv, --cookie-value**	The value of the cookie field for injection (optional).
-**-t, --table**	The table from which to extract data (for data extraction).
-**-c, --column**	The column to extract data from (for data extraction).
-**-w, --where**	The WHERE clause for SQL injection (e.g., Username = 'Admin').
-**--true-keywords**	Keywords to look for in the true condition response (e.g., Welcome).
-**--false-keywords**	Keywords to look for in the false condition response (e.g., Error).
-**--delay**	Delay (in seconds) between requests to avoid rate-limiting (default: 0).
-**--verbose**	Enable verbose output for debugging and detailed logging.
-**-f, --file**	Path to a file containing the raw HTTP request with an INJECT placeholder for SQL payloads.
-**--sleep-only**	Use only sleep-based detection methods for time-based SQL injection.
-**--timeout**	Timeout for each request in seconds (default: 10).
+Available Flags:
+- -u, --url	              The target URL to send requests to (required).
+- -cn, --cookie-name	    The name of the cookie field for injection (optional).
+- -cv, --cookie-value	    The value of the cookie field for injection (optional).
+- -t, --table	            The table from which to extract data (for data extraction).
+- -c, --column	          The column to extract data from (for data extraction).
+- -w, --where	            The WHERE clause for SQL injection (e.g., Username = 'Admin').
+- --true-keywords	        Keywords to look for in the true condition response (e.g., Welcome).
+- --false-keywords	      Keywords to look for in the false condition response (e.g., Error).
+- --delay	                Delay (in seconds) between requests to avoid rate-limiting (default: 0).
+- --verbose	              Enable verbose output for debugging and detailed logging.
+- -f, --file	            Path to a file containing the raw HTTP request with an INJECT placeholder for SQL payloads.
+- --sleep-only	          Use only sleep-based detection methods for time-based SQL injection.
+- --timeout               Timeout for each request in seconds (default: 10).
 
 ## How It Works
 
