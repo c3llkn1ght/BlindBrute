@@ -8,4 +8,5 @@
 # look into linguistical statistics to optimize extraction
 # update readme
 # update requirements
+# actually test the script
 # probably a bunch of other shit
