@@ -6,4 +6,6 @@
 # allow users to specify binary ascii search (might be faster) or char based search
 # add a flag to determine column length if the user desires it
 # look into linguistical statistics to optimize extraction
+# update readme
+# update requirements
 # probably a bunch of other shit
