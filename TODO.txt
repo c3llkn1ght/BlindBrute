@@ -1,0 +1,4 @@
+### TODO: 
+# allow users to specify the http method with url based requests
+# clean up url logic
+# probably a bunch of other shit
