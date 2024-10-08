@@ -129,7 +129,6 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         if not args.sleep_only:
             print(f"[VERBOSE] Detection method: {detection}")
 
-    # Sleep-only detection
     if args.sleep_only:
         return sleep_based_detection(url, request_template, injectable_headers, static_headers, args)
 
@@ -214,7 +213,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         if not args.sleep_only:
             print(f"[VERBOSE] Extraction method: {extraction}")
 
-    # Use helper function to send baseline request
+    # Step 1: Baseline request
     try:
         response, baseline_status_code, baseline_content_length, _ = send_baseline_request(
             url, request_template, injectable_headers, static_headers, args
@@ -223,7 +222,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         print(f"[-] Error during baseline request: {e}")
         return extracted_data
 
-    # Step 1: Iterate through possible characters until data_length is reached
+    # Step 2: Iterate through possible characters until data_length is reached
     while position <= data_length:
         found_char = False
         for char in CHARSET:
@@ -240,7 +239,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                 found_char = True
                 break
 
-        # If no character was found, check sleep-based extraction as a fallback
+        # Step 3: Sleep-based extraction as a fallback
         if not found_char:
             print("[*] Fallback: Attempting sleep-based extraction...")
             for char in CHARSET:
@@ -689,13 +688,13 @@ def main():
         column=args.column, 
         where_clause=args.where, 
         string_function=string_function, 
-        position=1,  # Start from position 1
+        position=1,
         db_name=db_type,
-        data_length=data_length,  # Pass the data_length here
+        data_length=data_length,
         request_template=request_template,
         injectable_headers=injectable_headers,
         static_headers=static_headers,
-        extraction=detection,  # Pass detection method here
+        extraction=detection,
         args=args
     )
     print(f"Extracted data: {extracted_data}")
