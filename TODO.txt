@@ -1,11 +1,12 @@
 ### TODO: 
 # allow users to specify the http method with url based requests
 # clean up url logic
-# make it async with asyncio (oof)
+# make it async with asyncio or makybe make it threaded
 # allow a user to pass in a wordlist instead of extracting characters
 # allow users to specify binary ascii search (might be faster) or char based search
 # add a flag to determine column length if the user desires it
-# look into linguistical statistics to optimize extraction
+# look into quantitative linguistics to optimize extraction
 # update readme
 # update requirements
+# actually test the script
 # probably a bunch of other shit
