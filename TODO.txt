@@ -1,9 +1,11 @@
 ### TODO: 
 # allow users to specify the http method with url based requests
 # clean up url logic
-# make it async with asyncio or makybe make it threaded
-# allow a user to pass in a wordlist instead of extracting characters
-# allow users to specify binary ascii search (might be faster) or char based search
+# --force option to skip is_injectable and go straight to detect_database
+# figure out how to let the user adjust the sleep duration in the queries.
+# max retries
+# output file instead of printing
+# make it async with asyncio or maybe make it threaded
 # add a flag to determine column length if the user desires it
 # look into quantitative linguistics to optimize extraction
 # update readme
