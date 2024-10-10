@@ -1,9 +1,8 @@
 ### TODO: 
 # allow users to specify the http method with url based requests
 # clean up url logic
-# --force option to skip is_injectable and go straight to detect_database
-# figure out how to let the user adjust the sleep duration in the queries.
-# max retries
+# figure out how to let the user adjust the sleep duration in the queries
+# max retries?
 # output file instead of printing
 # fix arg parsing so that flags aren't being used willy nilly
 # make it async with asyncio or maybe make it threaded
