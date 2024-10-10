@@ -4,7 +4,6 @@
 # max retries?
 # fix arg parsing so that flags aren't being used willy nilly
 # allow multiple dictionaries and approaches to combining them with a seperator
-# make it threaded
 # add a flag to determine column length if the user desires it
 # look into quantitative linguistics to optimize extraction
 # update readme
