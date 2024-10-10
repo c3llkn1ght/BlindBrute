@@ -14,10 +14,7 @@ BlindBrute is a Python tool designed for performing blind SQL injection attacks.
 
 ## Requirements
 
-- Python 3.6 or higher
-- `requests` library
-- `argparse` library
-- `json` library
+Pyhton 3.6 or higher
 
 Install dependencies using:
 
@@ -47,6 +44,7 @@ Optional Arguments:
     -m, --max-length             Maximum length of the extracted data (default: 1000)
     -ba, --binary-attack         Use binary search for ASCII extraction
     -da, --dictionary-attack     Path to a wordlist file for dictionary-based extraction
+    -o, --output-file            Specify a file to output the extracted data
     --level                      Specify the threading level (1-5, default: 2)
                                   Level 1 uses fewer threads; level 5 uses more threads for faster extraction.
     --delay                      Delay in seconds between requests to bypass rate limiting
@@ -59,7 +57,7 @@ Optional Arguments:
     --sleep-only                 Use only sleep-based detection methods
     --force                      Skip the injectability check and force a detection method 
                                   (status, content, keyword, or sleep)
-    -o, --output-file            Specify a file to output the extracted data
+
 
 Examples:
     python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'"
