@@ -10,6 +10,8 @@ import multiprocessing
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Constants and usage
+
 def usage():
     usage = """
     BlindBrute - Blind SQL Injection Brute Forcer with Header, Data, and File Support
