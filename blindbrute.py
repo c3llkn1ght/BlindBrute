@@ -743,6 +743,7 @@ def main():
     parser.add_argument('-c', '--column', required=True, help="Column name to extract (e.g., Password)")
     parser.add_argument('-w', '--where', required=True, help="WHERE clause (e.g., Username = 'Administrator')")
     parser.add_argument('-m', '--max-length', type=int, default=1000, help="Maximum length of the extracted data that the script will check for (default: 1000)")
+    parser.add_argument('-o', '--output-file', required=False, help="Specify a file to output the extracted data")
     parser.add_argument('-ba', '--binary-attack', action='store_true', help="Use binary search for ASCII extraction")
     parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist file for dictionary-based extraction.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
@@ -857,7 +858,17 @@ def main():
         extraction=detection,
         args=args
     )
-    print(f"Extracted data: {extracted_data}")
+
+    if args.output_file:
+        try:
+            with open(args.output_file, 'w') as output_file:
+                output_file.write(extracted_data)
+            print(f"[+] Data written to {args.output_file}")
+        except Exception as e:
+            print(f"[-] Error writing to output file: {e}")
+            print(f"Extracted data: {extracted_data}")
+    else:
+        print(f"Extracted data: {extracted_data}")
 
 if __name__ == "__main__":
     main()
