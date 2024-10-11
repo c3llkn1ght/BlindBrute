@@ -1,9 +1,9 @@
 ### TODO: 
 # allow users to specify the http method with url based requests
-# figure out how to let the user adjust the sleep duration in the queries
-# max retries?
+# clean up url logic
+# figure out how to let the user adjust the sleep duration in the queries.
+# max retries 
 # fix arg parsing so that flags aren't being used willy nilly
-# allow multiple dictionaries and approaches to combining them with a seperator
 # add a flag to determine column length if the user desires it
 # look into quantitative linguistics to optimize extraction
 # update readme
