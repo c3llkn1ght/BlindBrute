@@ -1,20 +1,22 @@
 # BlindBrute - Blind SQL Injection Brute Forcer
 
-BlindBrute is a Python tool designed for performing blind SQL injection attacks. It supports detecting vulnerabilities using a combination of status codes, content length, keyword comparisons, and time-based SQL injection techniques. The tool provides advanced customization through injectable headers, request data, and HTTP request templates, making it highly flexible for various attack scenarios.
+BlindBrute is a highly customizable Python tool designed for blind SQL injection attacks. It supports multiple detection methods, including status codes, content length, keyword-based comparison, and sleep-based SQL injection techniques. The tool allows for flexible payload injection using headers, request data, and raw HTTP request templates, making it adaptable to a wide range of scenarios
 
 ## Features
 
-- **Blind SQL Injection**: Performs blind SQL injection attacks using status codes, content length, keyword comparisons, and sleep-based detection.
+- **Multiple Detection Modes**: Performs blind SQL injection attacks using status codes, content length, keyword comparisons, and sleep-based detection.
 - **Customizable Payloads**: Supports customizable payloads for headers and request bodies, allowing fine-tuned injections tailored to your specific needs.
-- **Threading Support**: Utilizes multithreading to handle concurrent requests, significantly improving performance for large-scale extraction tasks.
-- **Dictionary-Based Extraction**: Supports dictionary-based SQL extraction with fallback to character-by-character extraction for optimized data extraction.
+- **Threaded Request Handling**: Supports multithreading for concurrent requests, speeding up extraction tasks.
+- **Dictionary-Based Extraction**: Supports dictionary-based SQL extraction for optimized data extraction. Will fallback to character by character extraction if the remaining data to extract is less than or equal to one-third of the detected data length.
 - **Binary Search for ASCII Extraction**: Performs binary ASCII extraction to speed up brute-forcing of individual characters.
-- **File-Based Request Templates**: Load and parse raw HTTP requests with placeholders for dynamic injection, enabling greater control over your requests.
-- **Sleep-Based Detection**: Supports sleep-based time-delay SQL injection techniques for detecting vulnerabilities and extracting data when other methods fail.
+- **Request Templates**: Load and parse raw HTTP requests with placeholders for dynamic injection.
+- **Sleep-Based Detection**: Supports sleep-based time-delay SQL injection techniques.
+- **Force Detection Mode**: Skip injectability checks and directly apply your desired detection method (status, content, keyword, or sleep).
 
 ## Requirements
 
 Pyhton 3.6 or higher
+requests 2.25.1 or higher
 
 Install dependencies using:
 
@@ -35,70 +37,29 @@ Required Arguments:
     -w, --where                  WHERE clause (e.g., Username = 'Administrator')
 
 Optional Arguments:
-    -ih, --injectable-headers     Injectable headers as key-value pairs 
-                                  (e.g., -ih Referer http://example.com)
-    -sh, --static-headers         Static headers as key-value pairs that do not contain payloads
-                                  (e.g., -sh session_id abcdefg12345)
+    -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://example.com)
+    -sh, --static-headers        Static headers as key-value pairs that do not contain payloads (e.g., -sh Session_ID abcdefg12345)
     -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
     -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
-    -m, --max-length             Maximum length of the extracted data (default: 1000)
+    -m, --max-length             Maximum length of the data that the script will look for (default: 1000)
     -ba, --binary-attack         Use binary search for ASCII extraction
     -da, --dictionary-attack     Path to a wordlist file for dictionary-based extraction
     -o, --output-file            Specify a file to output the extracted data
     --level                      Specify the threading level (1-5, default: 2)
-                                  Level 1 uses fewer threads; level 5 uses more threads for faster extraction.
     --delay                      Delay in seconds between requests to bypass rate limiting
     --timeout                    Timeout for each request in seconds (default: 10)
     --verbose                    Enable verbose output for debugging
-    --true-keywords              Keywords to search for in the true condition response 
-                                  (e.g., 'Welcome', 'Success')
-    --false-keywords             Keywords to search for in the false condition response
-                                  (e.g., 'Error', 'Invalid')
+    --true-keywords              Keywords to search for in the true condition response (e.g., 'Welcome', 'Success')
+    --false-keywords             Keywords to search for in the false condition response (e.g., 'Error', 'Invalid')
     --sleep-only                 Use only sleep-based detection methods
-    --force                      Skip the injectability check and force a detection method 
-                                  (status, content, keyword, or sleep)
+    --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
 
 
 Examples:
     python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'"
-    python blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
+    python blindbrute.py -u "http://example.com/login"  -t users -c password -w "username='admin' -ih Cookie 'SESSION=abc123'"
     python blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
-    python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
-```
-
-## Key Features and Options
-
-### 1. **Injectable and Static Headers**
-Specify headers that will be used for the SQL injection payloads (`--injectable-headers`) and static headers that remain constant (`--static-headers`).
-
-### 2. **Customizable Requests**
-Provide data in the body of the request for POST requests (`--data`) or use raw HTTP request templates (`--file`) for highly customizable request payloads.
-
-### 3. **Threading for Performance**
-Set the threading level with the `--level` flag, ranging from 1 to 5. A higher level increases the number of concurrent workers, improving extraction speed, especially when dealing with large datasets.
-
-### 4. **Binary ASCII Extraction**
-Use binary search (`--binary-attack`) to extract ASCII values more efficiently, reducing the number of requests for each character.
-
-### 5. **Dictionary-Based Extraction**
-Use a wordlist file (`--dictionary-attack`) to attempt to match entries during extraction, with a fallback to character-based extraction if needed.
-
-### 6. **Sleep-Based Detection**
-Use sleep-based SQL injection to detect vulnerabilities and extract data by introducing time delays (`--sleep-only`).
-
-### 7. **Force Detection Method**
-Skip the injectability check and force the script to use a specific detection method (`--force`), choosing from status code, content length, keyword-based, or sleep-based detection.
-
-### 8. **Output to File**
-Save the extracted data directly to a file using the `--output-file` flag.
-
-## Threading and Performance
-
-The `--level` flag allows you to adjust the threading level (1-5). The number of concurrent threads is determined by the number of CPU cores multiplied by the threading level. Higher levels increase performance but may be limited by your system's I/O capacity.
-
-```bash
---level 1  # Least threads, suitable for low-performance systems
---level 5  # Maximum threading, for fast extraction
+    python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status --dictionary-attack --level 5
 ```
 
 ## License
