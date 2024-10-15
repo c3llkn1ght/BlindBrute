@@ -1,11 +1,8 @@
 ### TODO: 
-# allow users to specify the http method with url based requests
-# clean up url logic
-# figure out how to let the user adjust the sleep duration in the queries.
-# max retries 
-# fix arg parsing so that flags aren't being used willy nilly
-# add a flag to determine column length if the user desires it
+# max retries
+# allow users to specify the database type
 # look into quantitative linguistics to optimize extraction
+# fix arg parsing so that flags aren't being used willy nilly
 # update readme
 # update requirements
 # actually test the script

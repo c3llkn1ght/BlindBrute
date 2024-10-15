@@ -1,0 +1,132 @@
+{
+  "Microsoft SQL Server, MySQL, Sybase ASE": {
+    "version_query": "SELECT @@version",
+    "substring_function": "SUBSTRING",
+    "length_function": {
+      "Microsoft SQL Server": "LEN",
+      "MySQL": "LENGTH",
+      "Sybase ASE": "LEN"
+    },
+    "sleep_function": {
+      "Microsoft SQL Server": "WAITFOR DELAY '00:00:%'",
+      "MySQL": "SELECT SLEEP(%)",
+      "Sybase ASE": "WAITFOR DELAY '00:00:%'"
+    }
+  },
+  "PostgreSQL, MariaDB, Greenplum, CockroachDB, Percona Server, Amazon Redshift": {
+    "version_query": "SELECT version()",
+    "substring_function": "SUBSTRING",
+    "length_function": {
+      "PostgreSQL": "LENGTH",
+      "MariaDB": "LENGTH",
+      "Greenplum": "LENGTH",
+      "CockroachDB": "LENGTH",
+      "Percona Server": "LENGTH",
+      "Amazon Redshift": "LENGTH"
+    },
+    "sleep_function": {
+      "PostgreSQL": "pg_sleep(%)",
+      "MariaDB": "SELECT SLEEP(%)",
+      "Greenplum": "pg_sleep(%)",
+      "CockroachDB": "pg_sleep(%)",
+      "Percona Server": "SELECT SLEEP(%)",
+      "Amazon Redshift": "pg_sleep(%)"
+    }
+  },
+  "MongoDB": {
+    "version_query": "db.version()",
+    "substring_function": "N/A",
+    "length_function": "N/A",
+    "sleep_function": "N/A"
+  },
+  "Redis": {
+    "version_query": "INFO server",
+    "substring_function": "N/A",
+    "length_function": "N/A",
+    "sleep_function": "N/A"
+  },
+  "Oracle": {
+    "version_query": "SELECT * FROM v$version",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "DBMS_LOCK.SLEEP(%)"
+  },
+  "IBM Db2": {
+    "version_query": "SELECT service_level FROM TABLE (sysproc.env_get_inst_info()) AS INSTANCEINFO",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "CALL DBMS_LOCK.SLEEP(%)"
+  },
+  "Informix": {
+    "version_query": "SELECT DBINFO('version', 'full')",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "SLEEP(%)"
+  },
+  "Neo4j": {
+    "version_query": "CALL dbms.components() YIELD name, versions, edition UNWIND versions AS version RETURN name, version, edition",
+    "substring_function": "SUBSTRING",
+    "length_function": "LENGTH",
+    "sleep_function": "CALL apoc.util.sleep(%000)"
+  },
+  "Teradata": {
+    "version_query": "SELECT * FROM dbc.dbcinfo",
+    "substring_function": "SUBSTRING",
+    "length_function": "CHARACTER_LENGTH",
+    "sleep_function": "SLEEP(%)"
+  },
+  "MariaDB (alternative)": {
+    "version_query": "SHOW VARIABLES LIKE 'version'",
+    "substring_function": "SUBSTRING",
+    "length_function": "LENGTH",
+    "sleep_function": "SELECT SLEEP(%)"
+  },
+  "Firebird": {
+    "version_query": "SELECT rdb$get_context('SYSTEM', 'ENGINE_VERSION') FROM rdb$database",
+    "substring_function": "SUBSTRING",
+    "length_function": "CHAR_LENGTH",
+    "sleep_function": "SLEEP(%)"
+  },
+  "HSQLDB": {
+    "version_query": "SELECT DATABASE_VERSION() FROM INFORMATION_SCHEMA.SYSTEM_USERS",
+    "substring_function": "SUBSTRING",
+    "length_function": "LENGTH",
+    "sleep_function": "SELECT SLEEP(%)"
+  },
+  "H2 Database": {
+    "version_query": "SELECT H2VERSION() FROM DUAL",
+    "substring_function": "SUBSTRING",
+    "length_function": "LENGTH",
+    "sleep_function": "SELECT SLEEP(%)"
+  },
+  "SAP HANA": {
+    "version_query": "SELECT * FROM SYS.M_DATABASE",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "DO BEGIN WAIT FOR 'PT%S'; END"
+  },
+  "Ingres": {
+    "version_query": "SELECT DBMSINFO('version') FROM iitables",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "SELECT SLEEP(%)"
+  },
+  "VoltDB": {
+    "version_query": "SELECT @version",
+    "substring_function": "SUBSTRING",
+    "length_function": "LENGTH",
+    "sleep_function": "SLEEP(%)"
+  },
+  "SQLite": {
+    "version_query": "SELECT sqlite_version()",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "SELECT sqlite3_sleep(%000)"
+  },
+  "Cassandra": {
+    "version_query": "SELECT release_version FROM system.local",
+    "substring_function": "SUBSTR",
+    "length_function": "LENGTH",
+    "sleep_function": "N/A"
+  }
+}
