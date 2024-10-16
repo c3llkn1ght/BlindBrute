@@ -6,5 +6,5 @@
 # update readme
 # update requirements
 # actually test the script
+# maybe implement a function that dynamically lowers sleep times
 # probably a bunch of other shit
-
