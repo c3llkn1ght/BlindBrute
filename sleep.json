@@ -1,0 +1,12 @@
+{
+  "sleep_queries": [
+    "SLEEP(%)",
+    "WAITFOR DELAY '00:00:%'",
+    "pg_sleep(%)",
+    "DBMS_LOCK.SLEEP(%)",
+    "CALL DBMS_LOCK.SLEEP(%)",
+    "CALL apoc.util.sleep(%000)",
+    "DO BEGIN WAIT FOR 'PT%S'; END",
+    "sqlite3_sleep(%000)"
+  ]
+}

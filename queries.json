@@ -9,7 +9,7 @@
     },
     "sleep_query": {
       "Microsoft SQL Server": "WAITFOR DELAY '00:00:%'",
-      "MySQL": "SELECT SLEEP(%)",
+      "MySQL": "SLEEP(%)",
       "Sybase ASE": "WAITFOR DELAY '00:00:%'"
     }
   },
@@ -26,10 +26,10 @@
     },
     "sleep_query": {
       "PostgreSQL": "pg_sleep(%)",
-      "MariaDB": "SELECT SLEEP(%)",
+      "MariaDB": "SLEEP(%)",
       "Greenplum": "pg_sleep(%)",
       "CockroachDB": "pg_sleep(%)",
-      "Percona Server": "SELECT SLEEP(%)",
+      "Percona Server": "SLEEP(%)",
       "Amazon Redshift": "pg_sleep(%)"
     }
   },
@@ -57,12 +57,6 @@
     "length_query": "LENGTH",
     "sleep_query": "CALL DBMS_LOCK.SLEEP(%)"
   },
-  "Informix": {
-    "version_query": "SELECT DBINFO('version', 'full')",
-    "substring_query": "SUBSTR",
-    "length_query": "LENGTH",
-    "sleep_query": "SLEEP(%)"
-  },
   "Neo4j": {
     "version_query": "CALL dbms.components() YIELD name, versions, edition UNWIND versions AS version RETURN name, version, edition",
     "substring_query": "SUBSTRING",
@@ -79,7 +73,7 @@
     "version_query": "SHOW VARIABLES LIKE 'version'",
     "substring_query": "SUBSTRING",
     "length_query": "LENGTH",
-    "sleep_query": "SELECT SLEEP(%)"
+    "sleep_query": "SLEEP(%)"
   },
   "Firebird": {
     "version_query": "SELECT rdb$get_context('SYSTEM', 'ENGINE_VERSION') FROM rdb$database",
@@ -91,13 +85,13 @@
     "version_query": "SELECT DATABASE_VERSION() FROM INFORMATION_SCHEMA.SYSTEM_USERS",
     "substring_query": "SUBSTRING",
     "length_query": "LENGTH",
-    "sleep_query": "SELECT SLEEP(%)"
+    "sleep_query": "SLEEP(%)"
   },
   "H2 Database": {
     "version_query": "SELECT H2VERSION() FROM DUAL",
     "substring_query": "SUBSTRING",
     "length_query": "LENGTH",
-    "sleep_query": "SELECT SLEEP(%)"
+    "sleep_query": "SLEEP(%)"
   },
   "SAP HANA": {
     "version_query": "SELECT * FROM SYS.M_DATABASE",
@@ -109,7 +103,7 @@
     "version_query": "SELECT DBMSINFO('version') FROM iitables",
     "substring_query": "SUBSTR",
     "length_query": "LENGTH",
-    "sleep_query": "SELECT SLEEP(%)"
+    "sleep_query": "SLEEP(%)"
   },
   "VoltDB": {
     "version_query": "SELECT @version",
@@ -121,7 +115,7 @@
     "version_query": "SELECT sqlite_version()",
     "substring_query": "SUBSTR",
     "length_query": "LENGTH",
-    "sleep_query": "SELECT sqlite3_sleep(%000)"
+    "sleep_query": "sqlite3_sleep(%000)"
   },
   "Cassandra": {
     "version_query": "SELECT release_version FROM system.local",

