@@ -1,10 +1,9 @@
 ### TODO: 
 # max retries
 # allow users to specify the database type
-# look into quantitative linguistics to optimize extraction
 # fix arg parsing so that flags aren't being used willy nilly
 # update readme
 # update requirements
-# actually test the script
-# maybe implement a function that dynamically lowers sleep times
+# update docstrings
+# thoroughly test the script
 # probably a bunch of other shit

