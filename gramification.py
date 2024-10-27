@@ -13,18 +13,18 @@ def parse_data(file_path):
 
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:
-            password = line.strip()
-            if not password:
+            line = line.strip()
+            if not line:
                 continue
-            char_count.update(password)
-            bigrams = [password[i:i+2] for i in range(len(password)-1)]
+            char_count.update(line)
+            bigrams = [line[i:i+2] for i in range(len(line)-1)]
             bigram_count.update(bigrams)
-            trigrams = [password[i:i+3] for i in range(len(password)-2)]
+            trigrams = [line[i:i+3] for i in range(len(line)-2)]
             trigram_count.update(trigrams)
-            quadgrams = [password[i:i+4] for i in range(len(password)-3)]
+            quadgrams = [line[i:i+4] for i in range(len(line)-3)]
             quadgram_count.update(quadgrams)
-            start_char_count.update(password[0])
-            end_char_count.update(password[-1])
+            start_char_count.update(line[0])
+            end_char_count.update(line[-1])
 
     return char_count, bigram_count, trigram_count, quadgram_count, start_char_count, end_char_count
 

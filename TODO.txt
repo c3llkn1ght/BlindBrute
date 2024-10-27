@@ -1,7 +1,5 @@
-### TODO: 
-# max retries
+### TODO:
 # allow users to specify the database type
-# fix arg parsing so that flags aren't being used willy nilly
 # update readme
 # update requirements
 # update docstrings
