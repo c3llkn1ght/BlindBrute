@@ -30,39 +30,44 @@ pip install -r requirements.txt
 ## Usage
 
 ```bash
-Usage:
-    python blindbrute.py -u <URL> -t <TABLE> -c <COLUMN> -w <WHERE CLAUSE> [options]
+    BlindBrute - Blind SQL Injection Brute Forcer
 
-Required Arguments:
-    -u, --url                    Target URL
-    -t, --table                  Table name from which to extract the data
-    -c, --column                 Column name to extract (e.g., Password)
-    -w, --where                  WHERE clause (e.g., Username = 'Administrator')
+    Usage:
+        python blindbrute.py -u <URL> -t <TABLE> -c <COLUMN> -w <WHERE CLAUSE> [options]
 
-Optional Arguments:
-    -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://example.com)
-    -sh, --static-headers        Static headers as key-value pairs that do not contain payloads (e.g., -sh Session_ID abcdefg12345)
-    -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
-    -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
-    -m, --max-length             Maximum length of the data that the script will look for (default: 1000)
-    -ba, --binary-attack         Use binary search for ASCII extraction
-    -da, --dictionary-attack     Path to a wordlist file for dictionary-based extraction
-    -o, --output-file            Specify a file to output the extracted data
-    --level                      Specify the threading level (1-5, default: 2)
-    --delay                      Delay in seconds between requests to bypass rate limiting
-    --timeout                    Timeout for each request in seconds (default: 10)
-    --verbose                    Enable verbose output for debugging
-    --true-keywords              Keywords to search for in the true condition response (e.g., 'Welcome', 'Success')
-    --false-keywords             Keywords to search for in the false condition response (e.g., 'Error', 'Invalid')
-    --sleep-only                 Use only sleep-based detection methods
-    --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
+    Required Arguments:
+        -u, --url                    Target URL
+        -t, --table                  Table name from which to extract the data
+        -c, --column                 Column name to extract (e.g., Password)
+        -w, --where                  WHERE clause (e.g., Username = 'Administrator')
 
+    Optional Arguments:
+        -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
+        -sh, --static-headers        Static headers as key-value pairs that do not contain payloads
+        -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
+        -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
+        -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
+        -o, --output-file            Specify a file to output the extracted data
+        -ba, --binary-attack         Use binary search for ASCII extraction. HIGHLY recommended if character case matters.
+        -da, --dictionary-attack     Path to a wordlist for dictionary-based extraction
+        -db, --database              Specify the database type (e.g., MySQL, PostgreSQL)
+        --level                      Specify the threading level
+        --delay                      Delay in seconds between requests to bypass rate limiting
+        --timeout                    Timeout for each request in seconds (default: 10)
+        --verbose                    Enable verbose output for debugging
+        --true-keywords              Keywords to search for in the true condition (e.g., 'Welcome', 'Success')
+        --false-keywords             Keywords to search for in the false condition (e.g., 'Error', 'Invalid')
+        --sleep-only                 Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1.
+        --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
+        --gramify                    Generate n-grams and probabilities from the provided file path
+        --top-n                      Number of top results to display and save for n-grams. Less is often more here.
+    
 
-Examples:
-    python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'"
-    python blindbrute.py -u "http://example.com/login"  -t users -c password -w "username='admin' -ih Cookie 'SESSION=abc123'"
-    python blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
-    python blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status --dictionary-attack --level 5
+    Examples:
+        blindbrute.py -u "http://example.com/login" -d "username=sam&password=" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
 ```
 
 ## License
