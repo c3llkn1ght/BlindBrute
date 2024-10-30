@@ -1247,8 +1247,10 @@ def arg_parse():
     parser.add_argument('-o', '--output-file', required=False, help="Specify a file to output the extracted data")
     parser.add_argument('-ba', '--binary-attack', action='store_true', help="Use binary search for ASCII extraction. HIGHLY recommended if character case matters.")
     parser.add_argument('-da', '--dictionary-attack', required=False, help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when 2/3's of the data extraction is complete unless user specifies otherwise.")
+    parser.add_argument('-db', '--database', type=str,help="Specify the database type (e.g., MySQL, PostgreSQL)")
     parser.add_argument('--level', type=int, choices=[1, 2, 3, 4, 5], default=2, help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. Number workers is calculated as (CPU cores * level). Default is 2.")
     parser.add_argument('--delay', type=float, default=0, help="Delay in seconds between requests to bypass rate limiting")
+    parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
     parser.add_argument('--timeout', type=int, default=10, help="Timeout for each request in seconds. If using --sleep-only, sleep time is automatically added to the timeout. ")
     parser.add_argument('--verbose', action='store_true', help="Enable verbose output for debugging")
     parser.add_argument('--true-keywords', nargs='+', help="Keywords to search for in the true condition (e.g., 'Welcome', 'Success')")
@@ -1256,7 +1258,6 @@ def arg_parse():
     parser.add_argument('--sleep-only', type=int, help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
     parser.add_argument('--gramify', type=str, help="Generate n-grams and probabilities from the provided file path")
     parser.add_argument('--top-n', type=int, default=10, help="Number of top results to display and save for n-grams. Less is often more here.")
-    parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'], help="Skip the check for an injectable field and force a detection method (status, content, keyword or sleep)")
 
     args = parser.parse_args()
 
@@ -1306,6 +1307,9 @@ def arg_parse():
     if args.force == 'keyword' and not (args.true_keywords or args.false_keywords):
         print("[!] You must provide --true-keywords or --false-keywords when forcing keyword-based detection.")
         return
+    if args.database and not args.force:
+        print("[!] You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
+        return
     if args.dictionary_attack and args.gramify:
         print("[*] Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
     if args.sleep_only:
@@ -1331,6 +1335,7 @@ def main():
     static_headers = dict(args.static_headers) if args.static_headers else {}
     request_template = None
     detection = None
+    db_name, substring_query, sleep_query, length_query = None, None, None, None
 
     if args.file:
         request_template = load_request(args.file)
@@ -1358,6 +1363,28 @@ def main():
         else:
             detection = args.force
         print(f"[+] Skipping injection check and detection discovery. Using forced detection method: {detection}")
+    if args.database:
+        db_provided = args.database
+        db_queries = None
+        db_specific = None
+        for db_key in queries:
+            if db_provided.lower() in db_key.lower():
+                db_queries = queries[db_key]
+                if isinstance(db_queries.get("sleep_query"), dict):
+                    for spec_key in db_queries["sleep_query"]:
+                        if db_provided.lower() in spec_key.lower():
+                            db_specific = spec_key
+                            break
+                db_name = db_key
+                break
+        if db_queries:
+            print(f"[+] Skipping detection. Using specified database: {db_name if not db_specific else db_specific}")
+            substring_query = db_queries.get("substring_query")
+            sleep_query = db_queries.get("sleep_query")if not db_specific else db_queries["sleep_query"][db_specific]
+            length_query = db_queries.get("length_query") if not db_specific else db_queries["length_query"][db_specific]
+        else:
+            print(f"[-] Database '{db_name}' not found in the queries file. Exiting.")
+            return
     else:
         # Step 1: Check if the field is injectable
         injectable, detection = is_injectable(injectable_headers=injectable_headers, static_headers=static_headers,
@@ -1367,12 +1394,12 @@ def main():
         if not args.sleep_only:
             print(f"[+] Using {detection} detection method.")
 
-    #Step 2: Count columns
-    columns = column_count(detection=detection, workers=workers, queries=sl_queries, request_template=request_template, injectable_headers=injectable_headers, static_headers=static_headers, args=args)
+        #Step 2: Count columns
+        columns = column_count(detection=detection, workers=workers, queries=sl_queries, request_template=request_template, injectable_headers=injectable_headers, static_headers=static_headers, args=args)
 
-    # Step 3: Detect the database type
-    db_name, substring_query, sleep_query, length_query = detect_database(request_template=request_template, queries=queries, sl_queries=sl_queries, injectable_headers=injectable_headers,
-                                                                          static_headers=static_headers, workers=workers, detection=detection, columns=columns, args=args)
+        # Step 3: Detect the database type
+        db_name, substring_query, sleep_query, length_query = detect_database(request_template=request_template, queries=queries, sl_queries=sl_queries, injectable_headers=injectable_headers,
+                                                                              static_headers=static_headers, workers=workers, detection=detection, columns=columns, args=args)
 
     if not db_name:
         return

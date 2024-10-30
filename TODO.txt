@@ -1,5 +1,7 @@
 ### TODO:
-# allow users to specify the database type
+# allow word n-grams in extraction
+# scrape responses for keywords
+# optimize optimize optimize
 # update readme
 # update requirements
 # update docstrings
