@@ -1,17 +1,20 @@
 # BlindBrute - Blind SQL Injection Brute Forcer
 
-BlindBrute is a highly customizable Python tool designed for blind SQL injection attacks. It supports multiple detection methods, including status codes, content length, keyword-based comparison, and sleep-based SQL injection techniques. The tool allows for flexible payload injection using headers, request data, and raw HTTP request templates, making it adaptable to a wide range of scenarios
+BlindBrute is a highly customizable Python tool designed for blind SQL injection attacks. It supports multiple detection methods, including status codes, content length, keyword-based comparison, and sleep-based SQL injection techniques. It also allows for flexible payload injection using headers, request data, and raw HTTP request templates, making it adaptable to a wide range of scenarios. Data extraction can be optimized in a variety of ways depending on user input. 
 
 ## Features
-
-- **Multiple Detection Modes**: Performs blind SQL injection attacks using status codes, content length, keyword comparisons, and sleep-based detection.
-- **Customizable Payloads**: Supports customizable payloads for headers and request bodies, allowing fine-tuned injections tailored to your specific needs.
-- **Threaded Request Handling**: Supports multithreading for concurrent requests, speeding up extraction tasks.
-- **Dictionary-Based Extraction**: Supports dictionary-based SQL extraction for optimized data extraction. Will fallback to character by character extraction if the remaining data to extract is less than or equal to one-third of the detected data length.
-- **Binary Search for ASCII Extraction**: Performs binary ASCII extraction to speed up brute-forcing of individual characters.
-- **Request Templates**: Load and parse raw HTTP requests with placeholders for dynamic injection.
-- **Sleep-Based Detection**: Supports sleep-based time-delay SQL injection techniques.
-- **Force Detection Mode**: Skip injectability checks and directly apply your desired detection method (status, content, keyword, or sleep).
+ - **Injection Detection:** Automatically checks if the target field is injectable and determines the best detection method (status code, content length, keywords, or sleep-based).
+ - **Column Count Detection:** Determines the number of columns in the target table to craft proper SQL injection payloads.
+ - **Database Type Detection:** Identifies the type of database (e.g., MySQL, PostgreSQL, Oracle) to tailor the injection techniques accordingly.
+ - **Data Length Discovery:** Discovers the length of the data to optimize the extraction process.
+ - **Data Extraction Methods:**
+    - **Character-by-Character Extraction:** Extracts data one character at a time.
+    - **Binary Search Extraction:** Uses a binary search algorithm to optimize character extraction.
+    - **Dictionary Attack:** Uses a provided wordlist to speed up the extraction process.
+    - **Custom N-Gram Support:** Generate and use custom n-grams from sample text to prioritize character extraction, improving efficiency.
+ - **Threading Support:** Utilizes multithreading to speed up the extraction process.
+ - **Customizable Payloads:** Supports injectable headers, request data, and custom request files with placeholders for injections.
+ - **Supports HTTP Methods:** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS.
 
 ## Requirements
 
