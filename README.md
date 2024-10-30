@@ -14,12 +14,12 @@ BlindBrute is a highly customizable Python tool designed for blind SQL injection
     - **Custom N-Gram Support:** Generate and use custom n-grams from sample text to prioritize character extraction, improving efficiency.
  - **Threading Support:** Utilizes multithreading to speed up the extraction process.
  - **Customizable Payloads:** Supports injectable headers, request data, and custom request files with placeholders for injections.
- - **Supports HTTP Methods:** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS.
+ - **Supported HTTP Methods:** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS.
 
 ## Requirements
 
-Pyhton 3.6 or higher
-requests 2.25.1 or higher
+ - Pyhton 3.6 or higher
+ - requests 2.25.1 or higher
 
 Install dependencies using:
 
