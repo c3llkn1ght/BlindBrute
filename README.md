@@ -4,7 +4,7 @@ BlindBrute is a highly customizable Python tool designed for blind SQL injection
 
 ## Features
  - **Injection Detection:** Automatically checks if the target field is injectable and determines the best detection method (status code, content length, keywords, or time-based).
-   - **Threshold Types and Tolerance:** Dynamically determines and utilizes content length variances for all conditions to improve accuracy.
+   - **Threshold Types and Tolerance:** Dynamically determines and utilizes content length variances by condition (baseline, true, false, error) to improve accuracy.
  - **Column Detection:** Determines the number of columns in the target table to craft proper SQL injection payloads.
  - **Database Detection:** Identifies the type of database to tailor the injection techniques accordingly.
  - **Data Length Discovery:** Discovers the length of the data to optimize the extraction process.
