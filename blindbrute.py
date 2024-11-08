@@ -753,6 +753,7 @@ def extract_data(request_info, db_info, constants, args):
     extracted_data = ""
     wordlist = None
     position = 1
+    spent_switch = False
 
     if args.dictionary_attack:
         try:
@@ -846,7 +847,7 @@ def extract_data(request_info, db_info, constants, args):
     while position <= db_info.length:
         found_match = False
         fallback_to_char = False
-        if wordlist and position > (2 * db_info.length // 3):
+        if wordlist and position > (2 * db_info.length // 3) and not fallback_to_char:
             fallback_to_char = one_third()
 
         possible_values = wordlist if wordlist and not fallback_to_char else (
@@ -888,7 +889,8 @@ def extract_data(request_info, db_info, constants, args):
 
         if not found_match:
             if wordlist:
-                if spent():
+                if spent() or spent_switch:
+                    spent_switch = True
                     print(f"[*] Extracting single character at position {position} using binary search.")
                     low, high = 32, 126
                     found_match = False

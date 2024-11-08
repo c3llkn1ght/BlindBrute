@@ -1,12 +1,8 @@
 ### TODO:
 # allow word n-grams in extraction
-# fix force logic on is_injectable
-# update functions to accept conditions
-## fallback methods if inconclusive
-## pay attention to what conditions im allowed to test based on results from is_injectable
+## fallback methods if inconclusive (maybe?)
+## pay attention to what conditions im allowed to test based on results from is_injectable(maybe?)
 # optimize optimize optimize
 # update readme
 # update requirements
-# update docstrings
-# thoroughly test the script
 # probably a bunch of other shit
