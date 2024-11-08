@@ -105,12 +105,6 @@
     "length_query": "LENGTH",
     "sleep_query": "SLEEP(%)"
   },
-  "VoltDB": {
-    "version_query": "SELECT @version",
-    "substring_query": "SUBSTRING",
-    "length_query": "LENGTH",
-    "sleep_query": "SLEEP(%)"
-  },
   "SQLite": {
     "version_query": "SELECT sqlite_version()",
     "substring_query": "SUBSTR",

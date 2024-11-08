@@ -1,6 +1,9 @@
 ### TODO:
 # allow word n-grams in extraction
-# scrape responses for keywords
+# fix force logic on is_injectable
+# update functions to accept conditions
+## fallback methods if inconclusive
+## pay attention to what conditions im allowed to test based on results from is_injectable
 # optimize optimize optimize
 # update readme
 # update requirements
