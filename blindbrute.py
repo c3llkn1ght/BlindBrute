@@ -27,9 +27,9 @@ def usage():
 
     Required Arguments:
         -u, --url                    Target URL
-        -t, --table                  Table name from which to extract the data
-        -c, --column                 Column name to extract (e.g., Password)
-        -w, --where                  WHERE clause (e.g., Username = 'Administrator')
+        -t, --table                  Table name from which to extract the data (e.g., users)
+        -c, --column                 Column name to extract (e.g., password)
+        -w, --where                  WHERE clause (e.g., username='Administrator')
 
     Optional Arguments:
         -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
@@ -45,13 +45,12 @@ def usage():
         --delay                      Delay in seconds between requests to bypass rate limiting
         --timeout                    Timeout for each request in seconds (default: 10)
         --verbose                    Enable verbose output for debugging
-        --true-keywords              Keywords to search for in the true condition (e.g., 'Welcome', 'Success')
-        --false-keywords             Keywords to search for in the false condition (e.g., 'Error', 'Invalid')
-        --sleep-only                 Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1.
-        --force                      Skip the injectability check and force a detection method (status, content, keyword, or sleep)
-        --gramify                    Generate n-grams and probabilities from the provided file path")
+        --keywords                   Keywords to search for in the response text
+        --sleep-only                 Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. (default: 10)
+        --force                      Force a detection method (status, content, keyword, or sleep)
+        --gramify                    Generate n-grams and probabilities from the provided file path
         --top-n                      Number of top results to display and save for n-grams. Less is often more here.
-
+    
 
     Examples:
         blindbrute.py -u "http://example.com/login" -d "username=sam&password=" -t users -c password -w "username='admin'"
