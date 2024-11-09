@@ -741,7 +741,7 @@ def discover_length(request_info, db_info, args):
 
 def extract_data(request_info, db_info, constants, args):
     """
-    extracts data in a variety of ways. the default behavior is a threaded charcter-by-character
+    extracts data in a variety of ways. the default behavior is a threaded character-by-character
     approach with a standard set of letter frequencies and ngrams.if that doesnt tickle your fancy,
     you can provide a dictionary, use a binary search algorithm, or provide a more tailored piece
     of sample text for custom ngrams. the world is your oyster.
