@@ -1507,7 +1507,7 @@ def arg_parse():
     parser.add_argument('--sleep-only', type=int,
                         help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
     parser.add_argument('--gramify', type=str, help="Generate n-grams and probabilities from the provided file path")
-    parser.add_argument('--top-n', type=int, default=10,
+    parser.add_argument('--top-n', type=int,
                         help="Number of top results to display and save for n-grams. Less is often more here.")
 
     args = parser.parse_args()
@@ -1545,10 +1545,6 @@ def arg_parse():
     if args.top_n and not args.gramify:
         print(
             "[!] You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
-        return
-    if args.top_n > 50:
-        print(
-            "[!] The --top-n value is too high. This will slow down the extraction process. 10-20 is recommended. Reconsider.")
         return
     if args.file and not os.path.exists(args.file):
         print(f"[!] The provided request file path {args.file} does not exist or cannot be accessed.")
