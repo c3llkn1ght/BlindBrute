@@ -2,12 +2,12 @@ import os
 import sys
 import time
 import json
-import msvcrt
 import string
 import select
 import requests
 import argparse
 import platform
+import threading
 import statistics
 from copy import deepcopy
 from urllib.parse import quote
@@ -962,87 +962,60 @@ def extract_data(request_info, db_info, constants, args):
 ### Prompts
 
 
+class InputThread(threading.Thread):
+    def __init__(self):
+        super().__init__()
+        self.input_value = None
+    def run(self):
+        self.input_value = sys.stdin.readline()
+
+def input_with_timeout(timeout):
+    input_thread = InputThread()
+    input_thread.daemon = True
+    input_thread.start()
+    input_thread.join(timeout)
+    if input_thread.is_alive():
+        return None
+    else:
+        return input_thread.input_value.strip().lower()
+
 def no_length():
     print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ",
           end='', flush=True)
-
-    if platform.system() == "Windows":
-        start_time = time.time()
-        while True:
-            if (time.time() - start_time) > 10:
-                print("\n[*] No input received. Proceeding with extraction anyway.")
-                return True
-            if msvcrt.kbhit():
-                user_input = input().strip().lower()
-                return user_input == 'y'
+    user_input = input_with_timeout(20)
+    if user_input == 'y':
+        return True
+    elif user_input == 'n':
+        return False
     else:
-        i, _, _ = select.select([sys.stdin], [], [], 60)
-        if i:
-            user_input = sys.stdin.readline().strip().lower()
-            return user_input == 'y'
-        else:
-            print("\n[*] No input received. Proceeding with extraction anyway.")
-            return True
-
+        print("\n[*] No input received. Proceeding with extraction anyway.")
+        return True
 
 def one_third():
     print(
         "\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
     print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
-
-    if platform.system() == "Windows":
-        start_time = time.time()
-        while True:
-            if (time.time() - start_time) > 10:
-                print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
-                return True
-            if msvcrt.kbhit():
-                user_input = input().strip().lower()
-                if user_input == 'y':
-                    return True
-                elif user_input == 'n':
-                    return False
+    user_input = input_with_timeout(20)
+    if user_input == 'y':
+        return True
+    elif user_input == 'n':
+        return False
     else:
-        i, _, _ = select.select([sys.stdin], [], [], 60)
-        if i:
-            user_input = sys.stdin.readline().strip().lower()
-            if user_input == 'y':
-                return True
-            elif user_input == 'n':
-                return False
-        else:
-            print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
-            return True
-
+        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+        return True
 
 def spent():
     print(
         "\n[*] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ",
         end='', flush=True)
-
-    if platform.system() == "Windows":
-        start_time = time.time()
-        while True:
-            if (time.time() - start_time) > 10:
-                print("\n[*] No input received. Proceeding with character extraction automatically.")
-                return True
-            if msvcrt.kbhit():
-                user_input = input().strip().lower()
-                if user_input == 'y':
-                    return True
-                elif user_input == 'n':
-                    return False
+    user_input = input_with_timeout(20)
+    if user_input == 'y':
+        return True
+    elif user_input == 'n':
+        return False
     else:
-        i, _, _ = select.select([sys.stdin], [], [], 60)
-        if i:
-            user_input = sys.stdin.readline().strip().lower()
-            if user_input == 'y':
-                return True
-            elif user_input == 'n':
-                return False
-        else:
-            print("\n[*] No input received. Proceeding with character extraction automatically.")
-            return True
+        print("\n[*] No input received. Proceeding with character extraction automatically.")
+        return True
 
 
 ### Helper Functions <3
