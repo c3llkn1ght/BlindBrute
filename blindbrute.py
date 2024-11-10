@@ -1579,7 +1579,7 @@ def arg_parse():
     if errors:
         for error in errors:
             print(error)
-            return
+        return
     else:
         return args
 
