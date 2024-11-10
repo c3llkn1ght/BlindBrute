@@ -1,7 +1,7 @@
 ### TODO:
 # allow word n-grams in extraction
-## fallback methods if inconclusive (maybe?)
-## pay attention to what conditions im allowed to test based on results from is_injectable(maybe?)
+# add a shell option
+# really clean up and modularize the script for readability
 # optimize optimize optimize
 # update readme
 # update requirements

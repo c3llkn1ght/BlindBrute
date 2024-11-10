@@ -245,24 +245,23 @@ def is_injectable(request_info, constants, args):
     # Step 3: Status code check
     if baseline.status_code == 200:
         if true_status_code == 200 and false_status_code != 200 and error_status_code not in [200, false_status_code]:
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Status code detection (full).")
             scores["status"] += 3
             handling["status"] = "true, false, error"
         elif true_status_code == 200 and false_status_code == 200 and error_status_code != 200:
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Status code detection (error-only).")
             scores["status"] += 2
             handling["status"] = "error"
         elif true_status_code == 200 and false_status_code == error_status_code:
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[-] Field may be injectable, but status codes will not provide accurate data.")
         else:
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[-] Field may be injectable, but status codes will not provide accurate data.")
     else:
-        if not args.sleep_only:
-            print("[-] Malformed request, look over your input.")
+        print("[-] Malformed request, look over your input.")
         return False, None, None, None, constants, args
 
     # Step 4: Content length check
@@ -271,20 +270,20 @@ def is_injectable(request_info, constants, args):
             diff(true_content_length, error_content_length) and
             diff(false_content_length, error_content_length)
     ):
-        if not args.sleep_only:
+        if not (args.sleep_only or args.force):
             print("[+] Content length detection (full).")
         scores["content"] += 2.5
         handling["content"] = "true, false, error"
     elif not diff(true_content_length, false_content_length) and diff(false_content_length, error_content_length):
-        if not args.sleep_only:
+        if not (args.sleep_only or args.force):
             print("[+] Content length detection (error-only).")
         scores["content"] += 1.5
         handling["content"] = "false, error"
     elif not diff(true_content_length, false_content_length) and not diff(false_content_length, error_content_length):
-        if not args.sleep_only:
+        if not (args.sleep_only or args.force):
             print("[-] Field may be injectable, but content length will not provide accurate data.")
     else:
-        if not args.sleep_only:
+        if not (args.sleep_only or args.force):
             print("[-] Field may be injectable, but content length will not provide accurate data.")
 
     # Step 5: Keyword check
@@ -318,22 +317,22 @@ def is_injectable(request_info, constants, args):
         if only_true and only_false and only_error:
             scores["keyword"] += 3
             handling["keyword"] = "true, false, error"
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Keyword detection (full)")
         elif only_false and only_error:
             scores["keyword"] += 2
             handling["keyword"] = "false, error"
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Keyword detection (false, error)")
         elif only_error and only_true:
             scores["keyword"] += 1
             handling["keyword"] = "true, error"
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Keyword detection (true, error)")
         elif only_error:
             scores["keyword"] += 1
             handling["keyword"] = "error"
-            if not args.sleep_only:
+            if not (args.sleep_only or args.force):
                 print("[+] Keyword detection (error only)")
 
     smallest_content_diff = float("inf")
@@ -355,14 +354,13 @@ def is_injectable(request_info, constants, args):
     if scores[best_method] > 0:
         info = handling[best_method].split(", ")
         method = str(best_method)
-        if not args.sleep_only:
-            print(f"[+] Using {method}-based detection with conditions: {info}.")
         if args.force:
             return conditions, baseline_condition
-        if args.sleep_only:
+        elif args.sleep_only:
             method = "sleep"
             return True, baseline_condition, method, conditions, constants, args
         else:
+            print(f"[+] Using {method}-based detection with conditions: {info}.")
             return True, baseline_condition, method, conditions, constants, args
     else:
         print("[*] Fastest methods failed. Attempting sleep-based detection.")
@@ -393,7 +391,6 @@ def is_injectable(request_info, constants, args):
                 if response_time > args.sleep_only:
                     constants.sleep_queries["sleep_queries"] = [sleep_query.replace(str(args.sleep_only), '%')]
                     break
-
 
             except requests.exceptions.RequestException as e:
                 print(f"[-] Error during sleep injection request: {e}")
@@ -1506,7 +1503,7 @@ def arg_parse():
                         help="Maximum length of the extracted data that the script will check for (default: 1000)")
     parser.add_argument('-o', '--output-file', required=False, help="Specify a file to output the extracted data")
     parser.add_argument('-ih', '--injectable-headers', action='append', nargs=2, metavar=('key', 'value'),
-                        help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Fowarded-For 127.0.0.1)")
+                        help="Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com -ih X-Forwarded-For 127.0.0.1)")
     parser.add_argument('-sh', '--static-headers', action='append', nargs=2, metavar=('key', 'value'),
                         help="Static headers as key-value pairs that do not contain payloads "
                              "(e.g., -sh session_id abcdefg12345abababab123456789012)")

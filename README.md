@@ -1,6 +1,6 @@
 # BlindBrute - Blind SQL Injection Brute Forcer
 
-BlindBrute is a highly customizable Python tool designed for blind SQL injection attacks. It supports multiple detection methods, including status code, content length, keyword comparison, and time-based. It also allows for flexible payload injection using headers, request data, and raw HTTP request templates, making it adaptable to a wide range of scenarios. Data extraction can be optimized in a variety of ways depending on user input. 
+BlindBrute is a highly customizable Python tool designed for blind SQL injection attacks. It supports multiple detection methods, including status code, content length, keyword comparison, and time-based. It also allows for flexible payload injection using headers, query strings, request data, and raw HTTP request templates, making it adaptable to a wide range of scenarios. Data extraction can be optimized in a variety of ways depending on user input. 
 
 ## Features
  - **Injection Detection:** Automatically checks if the target field is injectable and determines the best detection method (status code, content length, keywords, or time-based).
