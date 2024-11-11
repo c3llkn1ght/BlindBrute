@@ -69,7 +69,7 @@ def load_request(file_path):
             file_content = f.read()
         return parse_request(file_content)
     except Exception as e:
-        print_colored("!", f"Error reading request file: {e}")
+        print_color("!", f"Error reading request file: {e}")
         return None, None, None
 
 
@@ -79,7 +79,7 @@ def load_grams(grams_file_path):
             grams = json.load(file)
         return grams
     except Exception as e:
-        print_colored("!", f"Error loading {grams_file_path}: {e}")
+        print_color("!", f"Error loading {grams_file_path}: {e}")
         return None
 
 
@@ -91,14 +91,14 @@ def load_queries():
         with open(queries_file, 'r') as file:
             queries = json.load(file)
     except Exception as e:
-        print_colored("!", f"Error loading version queries: {e}")
+        print_color("!", f"Error loading version queries: {e}")
         queries = {}
 
     try:
         with open(sleep_file, 'r') as file:
             sl_queries = json.load(file)
     except Exception as e:
-        print_colored("!", f"Error loading sleep queries: {e}")
+        print_color("!", f"Error loading sleep queries: {e}")
         sl_queries = {}
 
     return {"queries": queries, "sl_queries": sl_queries}
@@ -191,7 +191,7 @@ def is_injectable(request_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during baseline request: {e}")
+        print_color("!", f"Error during baseline request: {e}")
         return False, None, None, None, constants, args
 
     payloads = {
@@ -239,7 +239,7 @@ def is_injectable(request_info, constants, args):
 
 
         except requests.exceptions.RequestException as e:
-            print_colored("!", f"Error during {condition} condition injection request: {e}")
+            print_color("!", f"Error during {condition} condition injection request: {e}")
             return False, None, None, None, constants, args
 
     true_status_code = responses["true"]["status_code"]
@@ -253,22 +253,22 @@ def is_injectable(request_info, constants, args):
     if baseline.status_code == 200:
         if true_status_code == 200 and false_status_code != 200 and error_status_code not in [200, false_status_code]:
             if not (args.sleep_only or args.force):
-                print_colored("+", "Status code detection (full).")
+                print_color("+", "Status code detection (full).")
             scores["status"] += 3
             handling["status"] = "true, false, error"
         elif true_status_code == 200 and false_status_code == 200 and error_status_code != 200:
             if not (args.sleep_only or args.force):
-                print_colored("+", "Status code detection (error-only).")
+                print_color("+", "Status code detection (error-only).")
             scores["status"] += 2
             handling["status"] = "error"
         elif true_status_code == 200 and false_status_code == error_status_code:
             if not (args.sleep_only or args.force):
-                print_colored("-", "Field may be injectable, but status codes will not provide accurate data.")
+                print_color("-", "Field may be injectable, but status codes will not provide accurate data.")
         else:
             if not (args.sleep_only or args.force):
-                print_colored("-", "Field may be injectable, but status codes will not provide accurate data.")
+                print_color("-", "Field may be injectable, but status codes will not provide accurate data.")
     else:
-        print_colored("!", "Malformed request, look over your input.")
+        print_color("!", "Malformed request, look over your input.")
         return False, None, None, None, constants, args
 
     # Step 4: Content length check
@@ -278,20 +278,20 @@ def is_injectable(request_info, constants, args):
             diff(false_content_length, error_content_length)
     ):
         if not (args.sleep_only or args.force):
-            print_colored("+", "Content length detection (full).")
+            print_color("+", "Content length detection (full).")
         scores["content"] += 2.5
         handling["content"] = "true, false, error"
     elif not diff(true_content_length, false_content_length) and diff(false_content_length, error_content_length):
         if not (args.sleep_only or args.force):
-            print_colored("+", "Content length detection (error-only).")
+            print_color("+", "Content length detection (error-only).")
         scores["content"] += 1.5
         handling["content"] = "false, error"
     elif not diff(true_content_length, false_content_length) and not diff(false_content_length, error_content_length):
         if not (args.sleep_only or args.force):
-            print_colored("!", "Field may be injectable, but content length will not provide accurate data.")
+            print_color("!", "Field may be injectable, but content length will not provide accurate data.")
     else:
         if not (args.sleep_only or args.force):
-            print_colored("!", "Field may be injectable, but content length will not provide accurate data.")
+            print_color("!", "Field may be injectable, but content length will not provide accurate data.")
 
     # Step 5: Keyword check
     if args.keywords:
@@ -325,22 +325,22 @@ def is_injectable(request_info, constants, args):
             scores["keyword"] += 3
             handling["keyword"] = "true, false, error"
             if not (args.sleep_only or args.force):
-                print_colored("+", "Keyword detection (full)")
+                print_color("+", "Keyword detection (full)")
         elif only_false and only_error:
             scores["keyword"] += 2
             handling["keyword"] = "false, error"
             if not (args.sleep_only or args.force):
-                print_colored("+", "Keyword detection (false, error)")
+                print_color("+", "Keyword detection (false, error)")
         elif only_error and only_true:
             scores["keyword"] += 1
             handling["keyword"] = "true, error"
             if not (args.sleep_only or args.force):
-                print_colored("+", "Keyword detection (true, error)")
+                print_color("+", "Keyword detection (true, error)")
         elif only_error:
             scores["keyword"] += 1
             handling["keyword"] = "error"
             if not (args.sleep_only or args.force):
-                print_colored("+", "Keyword detection (error only)")
+                print_color("+", "Keyword detection (error only)")
 
     smallest_content_diff = float("inf")
     baseline_condition = None
@@ -353,7 +353,7 @@ def is_injectable(request_info, constants, args):
                 baseline_condition = condition
 
     if baseline_condition != "true":
-        print_colored("!", "Baseline condition does not evaluate to true. Check the information you supplied. "
+        print_color("!", "Baseline condition does not evaluate to true. Check the information you supplied. "
               "Make sure the database is receiving a known value.")
         return False, None, None, None, constants, args
 
@@ -367,15 +367,15 @@ def is_injectable(request_info, constants, args):
             method = "sleep"
             return True, baseline_condition, method, conditions, constants, args
         else:
-            print_colored("+", f"Using {method}-based detection with conditions: {info}.")
+            print_color("+", f"Using {method}-based detection with conditions: {info}.")
             return True, baseline_condition, method, conditions, constants, args
     else:
-        print_colored("*", "Fastest methods failed. Attempting sleep-based detection.")
+        print_color("*", "Fastest methods failed. Attempting sleep-based detection.")
         args.sleep_only = 10
         args.timeout += args.sleep_only
         sleep_queries = constants.sleep_queries.get("sleep_queries", [])
         if args.verbose:
-            print_colored("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
+            print_color("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
         for sleep_query in sleep_queries:
             sleep_query = sleep_query.replace('%', str(args.sleep_only))
             new_payload = f"' AND {sleep_query} AND '1'='1"
@@ -402,15 +402,15 @@ def is_injectable(request_info, constants, args):
                     break
 
             except requests.exceptions.RequestException as e:
-                print_colored("!", f"Error during sleep injection request: {e}")
+                print_color("!", f"Error during sleep injection request: {e}")
                 return False, None, None, None, constants, args
 
         if len(constants.sleep_queries["sleep_queries"]) == 1:
-            print_colored("+", f"Sleep query found: {constants.sleep_queries["sleep_queries"]}. Using sleep-based detection.")
+            print_color("+", f"Sleep query found: {constants.sleep_queries["sleep_queries"]}. Using sleep-based detection.")
             method = "sleep"
             return True, baseline_condition, method, conditions, constants, args
 
-    print_colored("!", "No significant differences detected between conditions. Field is likely not injectable.")
+    print_color("!", "No significant differences detected between conditions. Field is likely not injectable.")
     return False, None, None, None, constants, args
 
 
@@ -433,7 +433,7 @@ def column_count(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during baseline request: {e}")
+        print_color("!", f"Error during baseline request: {e}")
         return
 
     # Step 2: Prepare queries
@@ -447,7 +447,7 @@ def column_count(request_info, db_info, constants, args):
             if args.sleep_only:
                 for sleep_query in sleep_queries:
                     if not sleep_query or sleep_query == "N/A":
-                        print_colored("-", f"Invalid or unavailable sleep query. Skipping.")
+                        print_color("-", f"Invalid or unavailable sleep query. Skipping.")
                         continue
                     db_info.sleep_query = sleep_query
                     sleep_query = sleep_query.replace('%', str(args.sleep_only))
@@ -482,12 +482,12 @@ def column_count(request_info, db_info, constants, args):
                 result = future.result()
                 if result is True or (isinstance(result, tuple) and result[0] is True):
                     columns += 1
-                    print_colored("+", f"Found {columns} columns")
+                    print_color("+", f"Found {columns} columns")
                     return columns
 
             columns += 1
 
-    print_colored("-", f"Unable to detect the columns.")
+    print_color("-", f"Unable to detect the columns.")
     return None
 
 
@@ -523,7 +523,7 @@ def detect_database(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during baseline request: {e}")
+        print_color("!", f"Error during baseline request: {e}")
         return None, args
 
     # Step 2: Sleep-only detection
@@ -531,7 +531,7 @@ def detect_database(request_info, db_info, constants, args):
     if args.sleep_only:
         sleep_queries = constants.sleep_queries.get("sleep_queries", [])
         if args.verbose:
-            print_colored("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
+            print_color("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
         with ThreadPoolExecutor(max_workers=constants.workers) as executor:
             for sleep_query in sleep_queries:
                 db_info_copy = deepcopy(db_info)
@@ -556,7 +556,7 @@ def detect_database(request_info, db_info, constants, args):
                 if result and result[0] is True:
                     sleep_query = result[1]
                     db_info.sleep_query = sleep_query.replace(str(args.sleep_only), '%')
-                    print_colored("+", f"Sleep-based detection with query {sleep_query}")
+                    print_color("+", f"Sleep-based detection with query {sleep_query}")
                     # Step 4: Lower sleep time
                     new_sleep = lower(
                         request_info=request_info, db_info=db_info,
@@ -566,7 +566,7 @@ def detect_database(request_info, db_info, constants, args):
                     sleep_query = sleep_query.replace(str(args.sleep_only), str(new_sleep))
                     args.sleep_only = new_sleep
                     # Step 5: Check version queries
-                    print_colored("*", f"Checking associated version queries")
+                    print_color("*", f"Checking associated version queries")
                     version_tasks = []
                     with ThreadPoolExecutor(max_workers=constants.workers) as version_executor:
                         for db_name, queries in constants.queries.items():
@@ -607,11 +607,11 @@ def detect_database(request_info, db_info, constants, args):
                             result = version_future.result()
                             if result:
                                 db_info = result
-                                print_colored("+", f"Database confirmed: {db_info.db_specific if db_info.db_specific else db_info.db_name}")
+                                print_color("+", f"Database confirmed: {db_info.db_specific if db_info.db_specific else db_info.db_name}")
                                 db_info.sleep_query = sleep_query.replace('%', str(args.sleep_only))
                                 return db_info, args
 
-                    print_colored("!", f"No database confirmed with version queries.")
+                    print_color("!", f"No database confirmed with version queries.")
                     return None, args
 
     else:
@@ -641,7 +641,7 @@ def detect_database(request_info, db_info, constants, args):
                 result = future.result()
                 if result is not None:
                     db_info = result
-                    print_colored("+", f"Database detected: {db_info.db_name}")
+                    print_color("+", f"Database detected: {db_info.db_name}")
                     sleep_function = constants.queries[db_info.db_name].get("sleep_query", None)
                     # Step 9: Narrow down the database if needed
                     if isinstance(sleep_function, dict):
@@ -657,7 +657,7 @@ def detect_database(request_info, db_info, constants, args):
                                 db_info_copy.db_specific = db_specific
                                 db_info_copy.sleep_query = sleep_query
                                 if not sleep_query or sleep_query == "N/A":
-                                    print_colored("-", f"Sleep function for {db_info_copy.db_specific} is not applicable or not found. Skipping.")
+                                    print_color("-", f"Sleep function for {db_info_copy.db_specific} is not applicable or not found. Skipping.")
                                     continue
                                 sleep_query = sleep_query.replace('%', str(args.sleep_only))
                                 new_payload = f"' AND {sleep_query} AND '1'='1"
@@ -680,13 +680,13 @@ def detect_database(request_info, db_info, constants, args):
                                 if specific_result is not None:
                                     args.sleep_only = None
                                     db_info = specific_result
-                                    print_colored("+", f"Narrowed down to specific database: {db_info.db_specific}")
+                                    print_color("+", f"Narrowed down to specific database: {db_info.db_specific}")
                                     return db_info, args
                     else:
                         db_info.sleep_query = sleep_function
                         return db_info, args
 
-    print_colored("!", f"Unable to detect the database type. Exiting.")
+    print_color("!", f"Unable to detect the database type. Exiting.")
     return None, args
 
 
@@ -697,7 +697,7 @@ def discover_length(request_info, db_info, args):
     """
 
     if not db_info.length_query or db_info.length_query == "N/A":
-        print_colored("*", f"Length query not found for {db_info.db_name}. Skipping data length detection.")
+        print_color("*", f"Length query not found for {db_info.db_name}. Skipping data length detection.")
         return None
 
     global current_animation
@@ -710,7 +710,7 @@ def discover_length(request_info, db_info, args):
     try:
         baseline = BaselineInfo(*baseline_request(request_info=request_info, args=args))
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during baseline request: {e}")
+        print_color("!", f"Error during baseline request: {e}")
         return None
 
     low, high = 1, args.max_length
@@ -749,16 +749,16 @@ def discover_length(request_info, db_info, args):
                 low = mid + 1
 
         except requests.exceptions.RequestException as e:
-            print_colored("!", f"Error during length discovery: {e}")
+            print_color("!", f"Error during length discovery: {e}")
             return None
 
     # Step 4: Return
     if length_info['length']:
         length = length_info['length']
-        print_colored("+", f"Data length discovered: {length}")
+        print_color("+", f"Data length discovered: {length}")
         return length
     else:
-        print_colored("-", f"Failed to discover data length within the maximum length {args.max_length}.")
+        print_color("-", f"Failed to discover data length within the maximum length {args.max_length}.")
         return None
 
 
@@ -784,9 +784,9 @@ def extract_data(request_info, db_info, constants, args):
             with open(args.dictionary_attack, 'r') as wordlist_file:
                 wordlist = [line.strip() for line in wordlist_file.readlines()]
             if args.verbose:
-                print_colored("VERBOSE", f" Loaded {len(wordlist)} lines from dictionary file.")
+                print_color("VERBOSE", f" Loaded {len(wordlist)} lines from dictionary file.")
         except Exception as e:
-            print_colored("!", f"Error loading wordlist: {e}")
+            print_color("!", f"Error loading wordlist: {e}")
             return None
 
     # Step 1: Baseline request
@@ -800,7 +800,7 @@ def extract_data(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during baseline request: {e}")
+        print_color("!", f"Error during baseline request: {e}")
         return
 
     # Binary search override (not threaded)
@@ -849,7 +849,7 @@ def extract_data(request_info, db_info, constants, args):
 
                 if result and operator == "=":
                     extracted_data += chr(mid)
-                    print_colored("+", f"Value found {chr(mid)} at position {position}")
+                    print_color("+", f"Value found {chr(mid)} at position {position}")
                     found_match = True
                     position += 1
                     break
@@ -862,12 +862,12 @@ def extract_data(request_info, db_info, constants, args):
 
             if 32 <= low <= 126 and not found_match:
                 extracted_data += chr(low)
-                print_colored("+", f"Value found {chr(low)} at position {position}")
+                print_color("+", f"Value found {chr(low)} at position {position}")
                 found_match = True
                 position += 1
 
             if not found_match:
-                print_colored("*", f"No match found at position {position}. Stopping extraction.")
+                print_color("*", f"No match found at position {position}. Stopping extraction.")
                 break
 
     # Step 2: Iterate over possible values
@@ -912,7 +912,7 @@ def extract_data(request_info, db_info, constants, args):
                 result = future.result()
                 if result:
                     extracted_data += result
-                    print_colored("+", f"Value found {result} at position {position}")
+                    print_color("+", f"Value found {result} at position {position}")
                     position += len(result)
                     found_match = True
                     break
@@ -921,7 +921,7 @@ def extract_data(request_info, db_info, constants, args):
             if wordlist:
                 if spent() or spent_switch:
                     spent_switch = True
-                    print_colored("*", f"Extracting single character at position {position} using binary search.")
+                    print_color("*", f"Extracting single character at position {position} using binary search.")
                     low, high = 32, 126
                     found_match = False
 
@@ -965,7 +965,7 @@ def extract_data(request_info, db_info, constants, args):
 
                         if result and operator == "=":
                             extracted_data += chr(mid)
-                            print_colored("+", f"Value Found: {chr(mid)} at position {position}")
+                            print_color("+", f"Value Found: {chr(mid)} at position {position}")
                             found_match = True
                             position += 1
                             break
@@ -978,16 +978,16 @@ def extract_data(request_info, db_info, constants, args):
 
                     if 32 <= low <= 126:
                         extracted_data += chr(low)
-                        print_colored("+", f"Value found {chr(low)} at position {position}")
+                        print_color("+", f"Value found {chr(low)} at position {position}")
                         found_match = True
                         position += 1
                         continue
                     else:
-                        print_colored("*", f"No valid match found at position {position}. Stopping extraction.")
+                        print_color("*", f"No valid match found at position {position}. Stopping extraction.")
                         break
 
             else:
-                print_colored("*", f"No match found at position {position}. Stopping extraction.")
+                print_color("*", f"No match found at position {position}. Stopping extraction.")
                 break
 
     return extracted_data
@@ -1040,7 +1040,7 @@ def begone_dancing_dots():
         current_animation = None
 
 
-def print_colored(symbol, message):
+def print_color(symbol, message):
     color_codes = {
         '+': '\033[92m',   # Green
         '!': '\033[91m',   # Red
@@ -1185,7 +1185,7 @@ def send_request(request_line=None, headers=None, body=None, args=None):
             response = requests.options(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         return response
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during {method} request: {e}")
+        print_color("!", f"Error during {method} request: {e}")
         return None
 
 
@@ -1212,8 +1212,8 @@ def baseline_request(request_info, args):
     response_time = end_time - start_time
 
     if args.verbose:
-        print_colored("VERBOSE", f" Baseline response status: {status_code}, content length: {content_length}")
-        print_colored("VERBOSE", f" Response time: {response_time} seconds")
+        print_color("VERBOSE", f" Baseline response status: {status_code}, content length: {content_length}")
+        print_color("VERBOSE", f" Response time: {response_time} seconds")
 
     return response, status_code, content_length
 
@@ -1271,15 +1271,15 @@ def inject(payload, request_info, args):
         response_time = end_time - start_time
 
         if args.verbose:
-            print_colored("VERBOSE", f" Sent request with payload: {payload.payload}")
-            print_colored("VERBOSE", f" Encoded: {payload.encoded}")
-            print_colored("VERBOSE", f" Response status: {response.status_code}, length: {len(response.text)}")
-            print_colored("VERBOSE", f" Request time: {response_time} seconds")
+            print_color("VERBOSE", f" Sent request with payload: {payload.payload}")
+            print_color("VERBOSE", f" Encoded: {payload.encoded}")
+            print_color("VERBOSE", f" Response status: {response.status_code}, length: {len(response.text)}")
+            print_color("VERBOSE", f" Request time: {response_time} seconds")
 
         return response, response_time
 
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during request: {e}")
+        print_color("!", f"Error during request: {e}")
         return None, None
 
 
@@ -1369,10 +1369,10 @@ def threshold_type(request_info, args, constants):
     absolute_preference_threshold = baseline_avg * 0.05
 
     if max_pairwise_diff > absolute_preference_threshold and all(var < absolute_preference_threshold for var in variances.values()):
-        print_colored("+", "Threshold type found: Absolute")
+        print_color("+", "Threshold type found: Absolute")
         return "absolute", avg_variance
     else:
-        print_colored("+", "Threshold type found: Ratio")
+        print_color("+", "Threshold type found: Ratio")
         return "ratio", avg_variance
 
 
@@ -1453,7 +1453,7 @@ def detect(payload, request_info, db_info, constants, baseline, args):
         )
 
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during detection for {db_info.db_name}: {e}")
+        print_color("!", f"Error during detection for {db_info.db_name}: {e}")
 
     return None
 
@@ -1476,7 +1476,7 @@ def lower(request_info, db_info, baseline, constants, args):
     while low < high:
         mid = (low + high) // 2
         if args.verbose:
-            print_colored("VERBOSE", f" Testing sleep time: {mid} seconds")
+            print_color("VERBOSE", f" Testing sleep time: {mid} seconds")
         sleep_query = sleep_query.replace('%', str(mid))
         new_payload = f"' AND {sleep_query} AND '1'='1"
         payload.payload = new_payload
@@ -1499,12 +1499,12 @@ def lower(request_info, db_info, baseline, constants, args):
         if sleep_time:
             new_sleep = mid
             high = mid - 1
-            print_colored("+", f"Sleep time of {mid} seconds is reliable. Trying to lower further.")
+            print_color("+", f"Sleep time of {mid} seconds is reliable. Trying to lower further.")
         else:
             low = mid + 1
-            print_colored("-", f"Sleep time of {mid} seconds is not reliable.")
+            print_color("-", f"Sleep time of {mid} seconds is not reliable.")
 
-    print_colored("+", f"Reliable sleep time found: {new_sleep} seconds")
+    print_color("+", f"Reliable sleep time found: {new_sleep} seconds")
     return new_sleep
 
 
@@ -1589,7 +1589,7 @@ def extract(payload, value, request_info, db_info, baseline, args):
         )
 
     except requests.exceptions.RequestException as e:
-        print_colored("!", f"Error during extraction for {value}: {e}")
+        print_color("!", f"Error during extraction for {value}: {e}")
         return None
 
 
@@ -1690,13 +1690,13 @@ def arg_parse():
     if args.database and not args.force:
         errors.append("You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
     if args.dictionary_attack and args.gramify:
-        print_colored("*", "Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
+        print_color("*", "Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
     if args.sleep_only:
         args.timeout += args.sleep_only
 
     if errors:
         for error in errors:
-            print_colored("!", error)
+            print_color("!", error)
         return
     else:
         return args
@@ -1768,10 +1768,10 @@ def main():
     if args.gramify:
         gramify_file_path = args.gramify
         if os.path.exists(gramify_file_path):
-            print_colored("*", f"Generating n-grams from {gramify_file_path}.")
+            print_color("*", f"Generating n-grams from {gramify_file_path}.")
             gramify(gramify_file_path, top_n=args.top_n)
         else:
-            print_colored("!", f"File {gramify_file_path} does not exist.")
+            print_color("!", f"File {gramify_file_path} does not exist.")
             return
 
     grams_file = 'grams.json' if os.path.exists('grams.json') else 'standardgrams.json'
@@ -1799,7 +1799,7 @@ def main():
         db_info.injectable = True
         db_info.conditions, db_info.baseline_condition = (
             is_injectable(request_info=request_info, constants=constants, args=args))
-        print_colored("+", f"Skipping method discovery. Using forced detection method: {db_info.method}")
+        print_color("+", f"Skipping method discovery. Using forced detection method: {db_info.method}")
     else:
         # Step 1: Check if the field is injectable
         db_info.injectable, db_info.baseline_condition, db_info.method, db_info.conditions, constants, args = (
@@ -1831,12 +1831,12 @@ def main():
                 db_info.db_name = db_name
                 break
         if db_queries:
-            print_colored("+", f"Skipping database detection. Using specified database: {db_name if not db_specific else db_specific}")
+            print_color("+", f"Skipping database detection. Using specified database: {db_name if not db_specific else db_specific}")
             db_info.substring_query = db_queries.get("substring_query")
             db_info.sleep_query = db_queries.get("sleep_query") if not db_specific else db_queries["sleep_query"][db_specific]
             db_info.length_query = db_queries.get("length_query") if not db_specific else db_queries["length_query"][db_specific]
         else:
-            print_colored("!", f"Database '{db_name}' not found in the queries file. Exiting.")
+            print_color("!", f"Database '{db_name}' not found in the queries file. Exiting.")
             return
     else:
         # Step 2: Count columns
@@ -1847,7 +1847,7 @@ def main():
     if not db_info.db_name:
         return
     elif not db_info.substring_query:
-        print_colored("!", f"Database {db_name} detected, but substring operations are not applicable.")
+        print_color("!", f"Database {db_name} detected, but substring operations are not applicable.")
         return
 
     # Step 4: Discover length of data
@@ -1856,9 +1856,9 @@ def main():
     if not db_info.length:
         if no_length():
             length = args.max_length
-            print_colored("*", f"Data length not discovered. Defaulting to max length: {length} (adjust with --max-length)")
+            print_color("*", f"Data length not discovered. Defaulting to max length: {length} (adjust with --max-length)")
         else:
-            print_colored("*", "User chose not to proceed with extraction.")
+            print_color("*", "User chose not to proceed with extraction.")
             return
 
     # Step 5: Extract the data
@@ -1870,9 +1870,9 @@ def main():
         try:
             with open(args.output_file, 'w') as output_file:
                 output_file.write(extracted_data)
-            print_colored("+", f"Data written to {args.output_file}")
+            print_color("+", f"Data written to {args.output_file}")
         except Exception as e:
-            print_colored("!", f"Error writing to output file: {e}")
+            print_color("!", f"Error writing to output file: {e}")
             print(f"Extracted data: {extracted_data}")
     else:
         print(f"Extracted data: {extracted_data}")
