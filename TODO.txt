@@ -1,6 +1,12 @@
 ### TODO:
 # allow word n-grams in extraction
 # add a shell option
+# bruteforce table and column names with premade dictionaries
+# extract full tables
+# add an option for full error-based extraction
+# develop a method to test every character in a field at the same time
+# employ out of band attacks possibly?
+# XML and JSON escape sequences
 # really clean up and modularize the script for readability
 # optimize optimize optimize
 # update readme
