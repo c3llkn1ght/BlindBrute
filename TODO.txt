@@ -7,8 +7,7 @@
 # develop a method to test every character in a field at the same time
 # employ out of band attacks possibly?
 # XML and JSON escape sequences
+# revisit the statistical analysis, i think it may be slightly flawed in execution
 # really clean up and modularize the script for readability
 # optimize optimize optimize
-# update readme
-# update requirements
 # probably a bunch of other shit
