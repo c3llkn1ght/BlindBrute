@@ -1,5 +1,6 @@
 ### TODO:
 # allow word n-grams in extraction
+# add stacked queries and inline queries
 # add a shell option
 # bruteforce table and column names with premade dictionaries
 # extract full tables
