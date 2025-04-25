@@ -30,7 +30,7 @@ pip install -r requirements.txt
 
 ## Usage
 
-```bash
+```
     BlindBrute - Blind SQL Injection Brute Forcer
 
     Usage:
